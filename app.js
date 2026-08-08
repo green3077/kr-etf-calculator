@@ -84,16 +84,35 @@ function formatKRW(n) {
   return Math.round(n).toLocaleString('ko-KR') + '원';
 }
 
+// 무료 jina 프록시/일부 운용사 API가 가끔 일시적으로 실패하는 걸 확인해서(사용자 리포트:
+// "됐다 안됐다 한다"), 재시도 없이 바로 실패 처리하던 걸 지수 백오프로 최대 2번 더 재시도하게 함.
+async function withRetry(fn, retries = 2, delayMs = 500) {
+  let lastErr;
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (i < retries) await new Promise((r) => setTimeout(r, delayMs * (i + 1)));
+    }
+  }
+  throw lastErr;
+}
+
 async function fetchProxiedText(url) {
-  const res = await fetch(JINA_PROXY + url);
-  if (!res.ok) throw new Error('조회 실패');
-  return res.text();
+  return withRetry(async () => {
+    const res = await fetch(JINA_PROXY + url);
+    if (!res.ok) throw new Error('조회 실패');
+    return res.text();
+  });
 }
 
 async function fetchDirectText(url) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error('조회 실패');
-  return res.text();
+  return withRetry(async () => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('조회 실패');
+    return res.text();
+  });
 }
 
 // ---------- 시세 (네이버 금융) ----------
@@ -257,7 +276,7 @@ function showScreen(n) {
   });
 
   els.btnPrev.style.display = n === 1 ? 'none' : '';
-  els.navButtons.classList.toggle('centered', n === 1 || n === 4);
+  els.navButtons.classList.toggle('centered', n === 1);
   els.btnNext.textContent = n === TOTAL_SCREENS ? '처음으로' : '다음';
 
   currentScreen = n;
