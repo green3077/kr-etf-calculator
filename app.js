@@ -392,6 +392,18 @@ function renderRowQuote(row, q) {
   diffEl.className = 'stock-quote-diff ' + cls;
 }
 
+// 지급일(payDate, 없으면 기준일 basicDate)의 '일'을 보고 월초(1~10일)/월중(11~20일)/
+// 월말(21일~)로 분류 — 위클리 상품도 최근 1회분 기준으로 대략적인 시기만 보여준다.
+function payTimingLabel(d) {
+  const dateStr = d.payDate || d.basicDate;
+  if (!dateStr) return '';
+  const day = Number(dateStr.slice(8, 10));
+  if (!day) return '';
+  if (day <= 10) return '·월초';
+  if (day <= 20) return '·월중';
+  return '·월말';
+}
+
 async function loadListDist(stock) {
   if (!stock.dist && !KNOWN_CUSTOM_DIST[stock.code]) return; // 소스를 모르는 커스텀 종목은 조용히 건너뜀
   const row = els.stockList.querySelector(`.stock-item[data-code="${stock.code}"]`);
@@ -408,7 +420,8 @@ async function loadListDist(stock) {
     const month = Number(latest.basicDate.slice(5, 7));
     const price = quoteCache[stock.code] && quoteCache[stock.code].price;
     const rateText = price ? ` (${(latest.amount / price * 100).toFixed(2)}%)` : '';
-    distEl.textContent = `최근 분배(${month}월) ${latest.amount}원${rateText}`;
+    const timing = payTimingLabel(latest);
+    distEl.textContent = `최근 분배(${month}월${timing}) ${latest.amount}원${rateText}`;
   } catch (err) {
     if (distEl) distEl.textContent = '분배 조회 실패';
   }
@@ -619,6 +632,7 @@ function renderYearlyBreakdown(shares, list) {
   let sumPostTax = 0;
   let sumOption = 0;
   let sumDividend = 0;
+  let sumPerShare = 0;
   // list는 최신순 -> 화면에는 오래된 순으로 보여준다. 올해 기록만 보여준다.
   const chron = list.filter((d) => d.basicDate.startsWith(currentYear)).reverse();
   chron.forEach((d) => {
@@ -629,6 +643,7 @@ function renderYearlyBreakdown(shares, list) {
     sumPostTax += postTax;
     sumOption += optionAmt;
     sumDividend += dividendAmt;
+    sumPerShare += d.amount;
     rows.push(`
       <div class="yearly-row">
         <span class="yearly-month">${d.basicDate.slice(5)}</span>
@@ -647,19 +662,21 @@ function renderYearlyBreakdown(shares, list) {
   els.yearlyList.innerHTML = rows.join('');
 
   const avgPostTax = sumPostTax / chron.length;
+  const avgPerShare = sumPerShare / chron.length;
   els.yearlySummary.innerHTML = `
     <div class="yearly-summary-row">
       <div class="yearly-summary-row-top">
         <span class="yearly-summary-label">${currentYear}년 합계 (${chron.length}회, 세후)</span>
         <span class="value-krw">${formatKRW(sumPostTax)}</span>
       </div>
-      <div class="yearly-summary-sub-line">(옵션 ${formatKRW(sumOption)} · 배당 ${formatKRW(sumDividend)})</div>
+      <div class="yearly-summary-sub-line">(옵션 ${formatKRW(sumOption)} · 배당 ${formatKRW(sumDividend)} · 주당 총 ${sumPerShare}원)</div>
     </div>
     <div class="yearly-summary-row">
       <div class="yearly-summary-row-top">
         <span class="yearly-summary-label">${currentYear}년 회당 평균 (세후)</span>
         <span class="value-krw">${formatKRW(avgPostTax)}</span>
       </div>
+      <div class="yearly-summary-sub-line">(주당 평균 ${avgPerShare.toFixed(1)}원)</div>
     </div>
   `;
 }
