@@ -387,7 +387,9 @@ async function loadListDist(stock) {
     }
     const latest = list[0];
     const month = Number(latest.basicDate.slice(5, 7));
-    distEl.textContent = `최근 분배(${month}월) ${latest.amount}원`;
+    const price = quoteCache[stock.code] && quoteCache[stock.code].price;
+    const rateText = price ? ` (${(latest.amount / price * 100).toFixed(2)}%)` : '';
+    distEl.textContent = `최근 분배(${month}월) ${latest.amount}원${rateText}`;
   } catch (err) {
     if (distEl) distEl.textContent = '분배 조회 실패';
   }
