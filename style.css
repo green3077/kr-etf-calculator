@@ -1,0 +1,540 @@
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  background: #0f1115;
+  color: #f2f3f5;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Malgun Gothic", sans-serif;
+}
+
+.app {
+  max-width: 480px;
+  min-height: 100vh;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  padding: 24px 24px calc(24px + env(safe-area-inset-bottom));
+}
+
+.dots {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-bottom: 24px;
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #2c2f38;
+  transition: background 0.2s, transform 0.2s;
+}
+.dot.active {
+  background: #6ee7b7;
+  transform: scale(1.3);
+}
+.dot.done {
+  background: #3d8f6c;
+}
+
+.screens {
+  flex: 1;
+  position: relative;
+}
+
+.screen {
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  padding-top: 8px;
+  animation: fadeIn 0.25s ease;
+}
+.screen.active {
+  display: flex;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.icon {
+  font-size: 48px;
+  margin-bottom: 8px;
+}
+
+h1 {
+  font-size: 22px;
+  margin: 0 0 8px;
+}
+
+.sub {
+  color: #9aa0ac;
+  font-size: 14px;
+  margin: 0 0 20px;
+  line-height: 1.5;
+}
+
+.hint-text {
+  color: #9aa0ac;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: left;
+}
+
+input[type="number"] {
+  width: 100%;
+  max-width: 280px;
+  background: #1a1d24;
+  border: 2px solid #2c2f38;
+  border-radius: 16px;
+  color: #f2f3f5;
+  font-size: 28px;
+  text-align: center;
+  padding: 16px 12px;
+  outline: none;
+  transition: border-color 0.2s, background 0.2s;
+}
+input[type="number"]:focus {
+  border-color: #6ee7b7;
+}
+input[type="number"][readonly] {
+  cursor: default;
+  background: #15171c;
+}
+input[type="number"][readonly]:focus {
+  border-color: #2c2f38;
+}
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.suffix-input {
+  position: relative;
+  width: 100%;
+  max-width: 280px;
+}
+.suffix-input .suffix {
+  position: absolute;
+  right: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 18px;
+  color: #9aa0ac;
+  font-weight: 600;
+  pointer-events: none;
+}
+.suffix-input input {
+  max-width: 100%;
+  padding-right: 68px;
+  text-align: right;
+}
+
+.fx-status {
+  margin-top: 14px;
+  font-size: 13px;
+  color: #9aa0ac;
+  min-height: 18px;
+}
+
+.diff-up { color: #f87171; }
+.diff-down { color: #60a5fa; }
+
+/* ---- 종목 선택 ---- */
+.stock-list {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.stock-item {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  background: #1a1d24;
+  border: 2px solid #2c2f38;
+  border-radius: 14px;
+  padding: 12px 16px;
+  cursor: pointer;
+  color: #f2f3f5;
+}
+.stock-item .stock-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+}
+.stock-item .stock-name {
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.stock-item .stock-meta {
+  font-size: 11px;
+  color: #9aa0ac;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.stock-item .stock-dist {
+  font-size: 11px;
+  color: #7c9885;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+.stock-item .stock-quote {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  flex: none;
+}
+.stock-item .stock-quote-price {
+  font-size: 14px;
+  font-weight: 600;
+}
+.stock-item .stock-quote-diff {
+  font-size: 12px;
+  color: #9aa0ac;
+  margin-top: 2px;
+}
+.stock-item.selected {
+  border-color: #6ee7b7;
+  background: #17231d;
+}
+.stock-delete-btn {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  border: none;
+  background: #2c2f38;
+  color: #9aa0ac;
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.stock-delete-btn:active {
+  background: #3a3e4a;
+}
+
+.stock-add-row {
+  width: 100%;
+  max-width: 320px;
+  margin-top: 8px;
+}
+.stock-add-btn {
+  width: 100%;
+  background: none;
+  border: 1px dashed #2c2f38;
+  border-radius: 12px;
+  color: #9aa0ac;
+  font-size: 13px;
+  padding: 10px;
+  cursor: pointer;
+}
+.stock-add-form {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.stock-add-form input {
+  flex: 1;
+  background: #1a1d24;
+  border: 2px solid #2c2f38;
+  border-radius: 10px;
+  color: #f2f3f5;
+  padding: 10px;
+  font-size: 13px;
+  min-width: 0;
+}
+.stock-add-confirm-btn {
+  flex: none;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: none;
+  background: #6ee7b7;
+  color: #0f1115;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---- 분배금 재원 분리 (옵션/배당) ---- */
+.split-card {
+  margin-top: 12px;
+  font-size: 13px;
+  color: #9aa0ac;
+}
+.split-option {
+  color: #60a5fa;
+}
+.split-dot {
+  margin: 0 6px;
+}
+.split-dividend {
+  color: #fbbf24;
+}
+.manual-div-block {
+  width: 100%;
+  max-width: 300px;
+  margin-top: 16px;
+}
+
+.result-subtitle {
+  color: #6ee7b7;
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 16px;
+}
+
+.result-meta {
+  margin: 0 0 20px;
+}
+.meta-line {
+  color: #9aa0ac;
+  font-size: 14px;
+  margin: 0;
+  line-height: 1.5;
+}
+.meta-asset-label {
+  margin-top: 8px;
+}
+.meta-asset-value {
+  color: #f2f3f5;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.result-card {
+  width: 100%;
+  max-width: 320px;
+  background: #1a1d24;
+  border-radius: 18px;
+  padding: 20px;
+}
+h1 + .result-card {
+  margin-top: 24px;
+}
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 0;
+  gap: 12px;
+}
+.result-row .label {
+  font-size: 14px;
+  color: #9aa0ac;
+  flex: none;
+}
+.result-row.sub-row {
+  border-bottom: 1px solid #2c2f38;
+}
+.result-row.sub-row .value-krw {
+  color: #f87171;
+  font-weight: 500;
+  font-size: 14px;
+}
+.split-detail-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+}
+.split-detail-main {
+  color: #9aa0ac;
+  font-weight: 500;
+  font-size: 13px;
+}
+.split-detail-sub {
+  color: #6b7280;
+  font-weight: 400;
+  font-size: 11px;
+  margin-top: 2px;
+}
+.result-row.final-row {
+  padding-top: 16px;
+}
+.result-row.final-row .label {
+  font-size: 15px;
+  color: #f2f3f5;
+  font-weight: 600;
+}
+.result-row.final-row .value-krw {
+  font-size: 22px;
+  color: #6ee7b7;
+  font-weight: 600;
+}
+
+.value-krw {
+  font-size: 18px;
+  font-weight: 600;
+  text-align: right;
+}
+.value-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+.value-stack .value-krw {
+  font-size: 20px;
+}
+.value-stack .value-usd {
+  font-size: 13px;
+  color: #9aa0ac;
+  margin-top: 2px;
+  font-weight: 500;
+}
+
+.yearly-block {
+  width: 100%;
+  max-width: 320px;
+  text-align: left;
+  margin-top: 22px;
+}
+.yearly-title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #f2f3f5;
+  text-align: center;
+  margin: 0 0 12px;
+}
+.yearly-list {
+  background: #1a1d24;
+  border-radius: 12px;
+  padding: 4px 16px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+.yearly-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #2c2f38;
+  font-size: 14px;
+  gap: 6px;
+}
+.yearly-row:last-child {
+  border-bottom: none;
+}
+.yearly-month {
+  color: #9aa0ac;
+  flex: none;
+  width: 38px;
+  white-space: nowrap;
+}
+.yearly-per-share {
+  color: #6b7280;
+  font-size: 11px;
+  flex: 1;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.yearly-amount {
+  font-weight: 600;
+  color: #f2f3f5;
+  flex: none;
+  white-space: nowrap;
+}
+.yearly-loading, .yearly-empty {
+  color: #9aa0ac;
+  font-size: 13px;
+  padding: 14px 16px;
+  margin: 0;
+  background: #1a1d24;
+  border-radius: 12px;
+}
+
+.yearly-summary {
+  margin-top: 8px;
+}
+.yearly-summary-row {
+  background: #1a1d24;
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin-top: 8px;
+}
+.yearly-summary-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.yearly-summary-label {
+  font-size: 13px;
+  color: #9aa0ac;
+}
+.yearly-summary-row:last-child .yearly-summary-label {
+  color: #f2f3f5;
+  font-weight: 600;
+}
+.yearly-summary-row:last-child {
+  border: 1px solid #2c2f38;
+}
+.yearly-summary-row .value-krw {
+  font-size: 17px;
+}
+.yearly-summary-row:last-child .value-krw {
+  color: #6ee7b7;
+}
+.yearly-summary-sub-line {
+  text-align: right;
+  color: #6b7280;
+  font-size: 11px;
+  margin-top: 6px;
+}
+
+.nav-buttons {
+  display: flex;
+  gap: 12px;
+  margin-top: 24px;
+}
+.nav-buttons.centered {
+  justify-content: center;
+}
+.nav-buttons.centered .btn {
+  flex: none;
+  width: 100%;
+  max-width: 280px;
+}
+
+.btn {
+  flex: 1;
+  padding: 16px;
+  border-radius: 14px;
+  border: none;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.btn.primary {
+  background: #6ee7b7;
+  color: #0f1115;
+}
+.btn.primary:active {
+  background: #57cf9f;
+}
+.btn.secondary {
+  background: #1a1d24;
+  color: #c3c8d1;
+}
+.btn.secondary:active {
+  background: #23262e;
+}
+.btn:disabled {
+  opacity: 0.4;
+  pointer-events: none;
+}

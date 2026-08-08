@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>국내 배당 ETF 계산기</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+
+  <div class="dots">
+    <span class="dot active" data-dot="1"></span>
+    <span class="dot" data-dot="2"></span>
+    <span class="dot" data-dot="3"></span>
+    <span class="dot" data-dot="4"></span>
+  </div>
+
+  <main class="screens">
+
+    <!-- 1. 종목 선택 -->
+    <section class="screen active" id="screen-1">
+      <div class="icon">📈</div>
+      <h1>종목 선택</h1>
+      <p class="sub">보유하신 국내 배당 ETF를 선택하세요</p>
+
+      <div class="stock-list" id="stockList"></div>
+
+      <div class="stock-add-row">
+        <button type="button" class="stock-add-btn" id="btnShowAddStock">+ 종목 코드로 추가</button>
+      </div>
+      <div class="stock-add-form" id="stockAddForm" style="display:none">
+        <input type="text" id="customCodeInput" placeholder="종목코드 (예: 483280)">
+        <button type="button" class="stock-add-confirm-btn" id="btnConfirmAddStock">추가</button>
+      </div>
+      <p class="fx-status" id="addStockStatus"></p>
+
+      <div class="result-card" id="quoteCard" style="display:none">
+        <div class="result-row final-row">
+          <span class="label" id="quoteName">-</span>
+          <span class="value-stack">
+            <span class="value-krw" id="quotePrice">-</span>
+            <span class="value-usd" id="quoteDiff">-</span>
+          </span>
+        </div>
+      </div>
+      <p class="fx-status" id="quoteStatus"></p>
+    </section>
+
+    <!-- 2. 보유수량 -->
+    <section class="screen" id="screen-2">
+      <div class="icon">📊</div>
+      <h1 id="sharesTitle">보유 수량</h1>
+      <p class="sub" id="sharesSub">보유하고 계신 주수를 입력하세요</p>
+      <div class="suffix-input">
+        <input type="number" id="shares" inputmode="decimal" placeholder="예: 100" min="0" step="1">
+        <span class="suffix">주</span>
+      </div>
+
+      <div class="result-card" id="holdingCard" style="display:none">
+        <div class="result-row final-row">
+          <span class="label">보유 평가금액</span>
+          <span class="value-krw" id="totalValue">-</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- 3. 분배금 확인 -->
+    <section class="screen" id="screen-3">
+      <div class="icon">💵</div>
+      <h1 id="divTitle">이번 분배금</h1>
+      <div class="result-card" id="holdingCard3" style="display:none">
+        <div class="result-row final-row">
+          <span class="label">보유 평가금액</span>
+          <span class="value-krw" id="totalValue3">-</span>
+        </div>
+      </div>
+      <div class="suffix-input">
+        <input type="number" id="divPerUnit" inputmode="decimal" min="0" step="1" placeholder="확인중입니다." readonly>
+        <span class="suffix">원/주</span>
+      </div>
+      <p class="fx-status" id="divStatus">분배금 조회중...</p>
+      <div class="split-card" id="splitCard" style="display:none">
+        <span class="split-option" id="splitOption">옵션 -원</span>
+        <span class="split-dot">·</span>
+        <span class="split-dividend" id="splitDividend">배당 -원</span>
+      </div>
+      <div id="manualDivBlock" class="manual-div-block" style="display:none">
+        <p class="hint-text">이 종목은 아직 분배금 자동조회를 지원하지 않습니다. 분배공시 등을 참고해 직접 입력해주세요.</p>
+      </div>
+    </section>
+
+    <!-- 4. 결과 -->
+    <section class="screen" id="screen-4">
+      <div class="icon">🧾</div>
+      <h1 id="resultTitle">분배금 계산 결과</h1>
+      <p class="result-subtitle" id="resultSubtitle"></p>
+      <div class="result-meta">
+        <p class="meta-line" id="metaShares"></p>
+        <p class="meta-line meta-asset-label">현재 총 금액</p>
+        <p class="meta-line meta-asset-value" id="metaTotalValue">-</p>
+      </div>
+      <div class="result-card">
+        <div class="result-row">
+          <span class="label">분배금 (세전)</span>
+          <span class="value-krw" id="preTaxKrw">-</span>
+        </div>
+        <div class="result-row sub-row" id="splitRow">
+          <span class="label">구성</span>
+          <span class="split-detail-stack">
+            <span class="split-detail-main" id="splitDetail">-</span>
+            <span class="split-detail-sub" id="splitDetailPerShare"></span>
+          </span>
+        </div>
+        <div class="result-row sub-row" id="taxRow">
+          <span class="label">배당소득세 (15.4%)</span>
+          <span class="value-krw" id="taxKrw">-</span>
+        </div>
+        <div class="result-row final-row">
+          <span class="label" id="postTaxLabel">세후 실수령액</span>
+          <span class="value-krw" id="postTaxKrw">-</span>
+        </div>
+      </div>
+      <p class="fx-status" id="unsupportedNote" style="display:none">이 종목은 옵션/배당 재원 분리 정보가 아직 없어 세후 금액을 정확히 계산할 수 없습니다. 위 금액은 세전 기준입니다.</p>
+
+      <div class="yearly-block" id="yearlyBlock" style="display:none">
+        <p class="yearly-title" id="yearlyTitle">월별 분배금 내역</p>
+        <div class="yearly-list" id="yearlyList"></div>
+        <div class="yearly-summary" id="yearlySummary"></div>
+      </div>
+    </section>
+
+  </main>
+
+  <div class="nav-buttons centered" id="navButtons">
+    <button type="button" id="btnPrev" class="btn secondary" style="display:none">이전</button>
+    <button type="button" id="btnNext" class="btn primary" disabled>다음</button>
+  </div>
+
+</div>
+<script src="stocks.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
