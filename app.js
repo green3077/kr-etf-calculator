@@ -1,5 +1,5 @@
 const TAX_RATE = 0.154; // 배당소득세(14%) + 지방소득세(1.4%)
-const TOTAL_SCREENS = 4;
+const TOTAL_SCREENS = 3; // 1: 종목선택, 2: 보유수량+분배금 확인(통합), 3: 결과
 const JINA_PROXY = 'https://r.jina.ai/';
 
 let currentScreen = 1;
@@ -8,6 +8,49 @@ let quote = null; // { price, diff, pct, date }
 let distList = null; // 선택된 종목의 월별 분배 내역 (최신순), fetchDistribution()의 정규화된 결과
 const quoteCache = {}; // code -> { price, diff, pct } (종목 리스트에서 미리 조회해둔 값, 선택 시 재사용)
 const distCache = {}; // code -> 분배 내역 배열 (종목 리스트에서 미리 조회해둔 값, 선택 시 재사용)
+
+// ---------- 업데이트 확인 ----------
+// 사이드로드 앱은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자 확인 필요),
+// 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
+const APP_VERSION_CODE = 2;
+const APP_VERSION_NAME = "1.1";
+const UPDATE_MANIFEST_URL = "https://green3077.github.io/kr-etf-calculator/version.json";
+const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
+const UpdateBridge = IS_NATIVE_UPDATE ? window.Capacitor.registerPlugin("UpdateBridge") : null;
+let pendingApkUrl = null;
+
+document.getElementById("btnCheckUpdate").addEventListener("click", async () => {
+  const btn = document.getElementById("btnCheckUpdate");
+  const status = document.getElementById("updateStatus");
+  if (pendingApkUrl) {
+    if (IS_NATIVE_UPDATE && UpdateBridge) {
+      UpdateBridge.openExternal({ url: pendingApkUrl }).catch(() => {
+        status.textContent = "업데이트 파일을 여는 데 실패했습니다.";
+      });
+    } else {
+      window.open(pendingApkUrl, "_blank");
+    }
+    return;
+  }
+  status.textContent = "업데이트 확인 중...";
+  try {
+    const res = await fetch(UPDATE_MANIFEST_URL + "?t=" + Date.now());
+    const info = await res.json();
+    if (!info || typeof info.versionCode !== "number") {
+      status.textContent = "업데이트 정보를 확인하지 못했습니다.";
+      return;
+    }
+    if (info.versionCode <= APP_VERSION_CODE) {
+      status.textContent = "이미 최신 버전입니다 (v" + APP_VERSION_NAME + ")";
+      return;
+    }
+    pendingApkUrl = info.apkUrl;
+    btn.textContent = "새 버전(" + (info.versionName || info.versionCode) + ") 다운로드하기";
+    status.textContent = "다시 눌러서 다운로드를 시작하세요.";
+  } catch (e) {
+    status.textContent = "업데이트 확인에 실패했습니다. 네트워크를 확인해주세요.";
+  }
+});
 
 // ---------- 사용자가 직접 추가한 종목 (localStorage에 저장, 기본 7종목과 별개) ----------
 // 어떤 운용사 API를 써야 할지 모르니 dist 소스는 없음 — 화면 3에서 자동으로 수동 입력으로 대체된다.
@@ -33,6 +76,7 @@ function allStocks() {
 }
 
 const els = {
+  ptrIndicator: document.getElementById('ptrIndicator'),
   stockList: document.getElementById('stockList'),
   quoteCard: document.getElementById('quoteCard'),
   quoteName: document.getElementById('quoteName'),
@@ -49,8 +93,6 @@ const els = {
   shares: document.getElementById('shares'),
   holdingCard: document.getElementById('holdingCard'),
   totalValue: document.getElementById('totalValue'),
-  holdingCard3: document.getElementById('holdingCard3'),
-  totalValue3: document.getElementById('totalValue3'),
   divTitle: document.getElementById('divTitle'),
   divPerUnit: document.getElementById('divPerUnit'),
   divStatus: document.getElementById('divStatus'),
@@ -58,6 +100,7 @@ const els = {
   splitOption: document.getElementById('splitOption'),
   splitDividend: document.getElementById('splitDividend'),
   manualDivBlock: document.getElementById('manualDivBlock'),
+  payDateStatus: document.getElementById('payDateStatus'),
   resultTitle: document.getElementById('resultTitle'),
   resultSubtitle: document.getElementById('resultSubtitle'),
   metaShares: document.getElementById('metaShares'),
@@ -248,10 +291,12 @@ async function fetchDistAce(fundCode) {
 
 // KB자산운용(RISE) — 별도 API 없이 상품 상세 페이지에 표가 서버에서 이미 렌더링되어 있다.
 // 과세표준액이 0원인 달은 "-"로 표시되어 있어 0으로 취급한다.
+// (2026-08-09: jina 프록시가 이 표를 탭 구분 대신 마크다운 표(`| ... | ... |`)로 내보내도록
+// 사이트 쪽 렌더링이 바뀐 걸 확인해서 정규식을 그에 맞게 고쳤다 — 예전 탭 구분 정규식은 더 이상 매치되지 않음.)
 async function fetchDistRise(slug) {
   const text = await fetchProxiedText(`https://www.riseetf.co.kr/prod/finderDetail/${slug}`);
   const rows = [];
-  const re = /(\d{4}-\d{2}-\d{2})\t(\d{4}-\d{2}-\d{2})\t([\d,]+)\t(-|[\d,]+)/g;
+  const re = /\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([\d,]+)\s*\|\s*(-|[\d,]+)\s*\|/g;
   let m;
   while ((m = re.exec(text))) {
     rows.push({
@@ -282,16 +327,17 @@ function showScreen(n) {
   currentScreen = n;
   updateNextEnabled();
 
-  if (n === 2) renderHoldingCard();
-  if (n === 3) loadDistribution();
-  if (n === 4) renderResult();
+  if (n === 2) {
+    renderHoldingCard();
+    loadDistribution();
+  }
+  if (n === 3) renderResult();
 }
 
 function updateNextEnabled() {
   let valid = true;
   if (currentScreen === 1) valid = !!(selectedStock && quote);
-  else if (currentScreen === 2) valid = Number(els.shares.value) > 0;
-  else if (currentScreen === 3) valid = Number(els.divPerUnit.value) > 0;
+  else if (currentScreen === 2) valid = Number(els.shares.value) > 0 && Number(els.divPerUnit.value) > 0;
   els.btnNext.disabled = !valid;
 }
 
@@ -520,32 +566,26 @@ function renderHoldingCard() {
   updateHoldingValue();
 }
 
-// 화면 2(보유수량)와 화면 3(분배금 확인) 양쪽에 같은 보유 평가금액을 보여준다.
 function updateHoldingValue() {
   const shares = Number(els.shares.value);
   const valid = shares > 0 && quote;
-  const text = valid ? formatKRW(shares * quote.price) : '-';
-
   els.holdingCard.style.display = valid ? 'block' : 'none';
-  els.totalValue.textContent = text;
-
-  els.holdingCard3.style.display = valid ? 'block' : 'none';
-  els.totalValue3.textContent = text;
+  els.totalValue.textContent = valid ? formatKRW(shares * quote.price) : '-';
 }
 els.shares.addEventListener('input', () => {
   updateHoldingValue();
   updateNextEnabled();
 });
 
-// ---------- 화면 3: 분배금 확인 ----------
+// ---------- 화면 2 (분배금 부분): 분배금 확인 ----------
 async function loadDistribution() {
-  updateHoldingValue();
   els.splitCard.style.display = 'none';
   els.manualDivBlock.style.display = 'none';
   els.divPerUnit.readOnly = true;
   els.divPerUnit.value = '';
   els.divTitle.textContent = '분배금 확인 중';
   els.divStatus.textContent = '공식 데이터 조회 중...';
+  els.payDateStatus.textContent = '';
   const stock = selectedStock;
 
   try {
@@ -556,10 +596,11 @@ async function loadDistribution() {
     els.divPerUnit.value = latest.amount;
     const optionAmt = latest.amount - latest.taxAmount;
     els.divTitle.textContent = `${latest.basicDate} 분배금`;
-    els.divStatus.textContent = `실지급일 ${latest.payDate}`;
+    els.divStatus.textContent = '';
     els.splitOption.textContent = `옵션 ${formatKRW(optionAmt)}`;
     els.splitDividend.textContent = `배당 ${formatKRW(latest.taxAmount)}`;
     els.splitCard.style.display = 'block';
+    els.payDateStatus.textContent = `실지급일 ${latest.payDate}`;
   } catch (err) {
     if (selectedStock !== stock) return;
     // 자동 조회가 실패한 경우에만 수동 입력으로 대체 (7종목 모두 공식 소스가 있지만, 네트워크
@@ -569,6 +610,7 @@ async function loadDistribution() {
     els.divPerUnit.placeholder = '예: 200';
     els.divStatus.textContent = '자동 조회 실패 — 공시를 참고해 직접 입력해주세요.';
     els.manualDivBlock.style.display = 'block';
+    els.payDateStatus.textContent = '';
   } finally {
     if (selectedStock === stock) updateNextEnabled();
   }
@@ -593,7 +635,9 @@ function renderResult() {
     // "이번 분배금 / 현재가"로 근사한 분배율을 부제목에 표시한다.
     const month = Number(latest.basicDate.slice(5, 7));
     const rate = quote ? ((latest.amount / quote.price) * 100).toFixed(2) : null;
-    els.resultSubtitle.textContent = rate ? `(${month}월 ${rate}% 분배)` : '';
+    els.resultSubtitle.textContent = rate
+      ? `(${month}월 ${rate}% 분배, 분배금 ${formatKRW(latest.amount)})`
+      : '';
     const optionPerUnit = latest.amount - latest.taxAmount;
     const dividendPerUnit = latest.taxAmount;
     const optionTotal = shares * optionPerUnit;
@@ -683,3 +727,90 @@ function renderYearlyBreakdown(shares, list) {
 
 renderStockList();
 showScreen(1);
+
+// ---------- 화면 1 pull-to-refresh: "분배 내역 없음"/"분배 조회 실패" 종목만 재조회 ----------
+// 무료 jina 프록시가 가끔 일시적으로 실패하는 걸 확인했는데(withRetry로 이미 어느 정도 대응하지만
+// 완전히 막지는 못함), 전체 새로고침(페이지 리로드) 없이 실패한 종목만 다시 불러올 수 있게 한다.
+const PTR_THRESHOLD = 70;
+let ptrStartY = null;
+let ptrDy = 0;
+let ptrPulling = false;
+let ptrRefreshing = false;
+
+function ptrAtTop() {
+  const el = document.scrollingElement || document.documentElement;
+  return el.scrollTop <= 0;
+}
+
+document.addEventListener('touchstart', (e) => {
+  if (currentScreen !== 1 || ptrRefreshing) return;
+  if (!ptrAtTop()) return;
+  ptrStartY = e.touches[0].clientY;
+  ptrPulling = false;
+  ptrDy = 0;
+}, { passive: true });
+
+document.addEventListener('touchmove', (e) => {
+  if (currentScreen !== 1 || ptrRefreshing || ptrStartY == null) return;
+  if (!ptrAtTop()) { ptrStartY = null; ptrPulling = false; return; }
+  const dy = e.touches[0].clientY - ptrStartY;
+  if (dy <= 10) return;
+  ptrPulling = true;
+  ptrDy = dy;
+  els.ptrIndicator.style.display = 'block';
+  els.ptrIndicator.textContent = dy > PTR_THRESHOLD ? '↑ 놓으면 새로고침' : '↓ 당겨서 새로고침';
+}, { passive: true });
+
+document.addEventListener('touchend', () => {
+  if (currentScreen === 1 && ptrPulling && ptrDy > PTR_THRESHOLD) {
+    refreshFailedDistributions();
+  } else if (els.ptrIndicator) {
+    els.ptrIndicator.style.display = 'none';
+  }
+  ptrStartY = null;
+  ptrPulling = false;
+  ptrDy = 0;
+});
+
+async function refreshFailedDistributions() {
+  ptrRefreshing = true;
+  els.ptrIndicator.style.display = 'block';
+  const targets = [];
+  els.stockList.querySelectorAll('.stock-item').forEach((row) => {
+    const distEl = row.querySelector('.stock-dist');
+    if (!distEl) return;
+    const text = distEl.textContent;
+    if (text === '분배 내역 없음' || text === '분배 조회 실패') {
+      const stock = allStocks().find((s) => s.code === row.dataset.code);
+      if (stock) {
+        targets.push(stock);
+        distEl.textContent = '분배 조회 중...';
+      }
+    }
+  });
+
+  if (targets.length === 0) {
+    els.ptrIndicator.textContent = '새로고침할 항목이 없습니다';
+  } else {
+    els.ptrIndicator.textContent = `${targets.length}개 종목 새로고침 중...`;
+    await runWithConcurrency(targets, (stock) => loadListDist(stock), 3);
+    els.ptrIndicator.textContent = '완료';
+  }
+  setTimeout(() => {
+    els.ptrIndicator.style.display = 'none';
+    ptrRefreshing = false;
+  }, 800);
+}
+
+// ---------- 안드로이드 하드웨어 뒤로가기: 앱 종료 대신 이전 화면으로 이동 ----------
+// capacitor.js가 로드된 네이티브 APK 안에서만 window.Capacitor가 존재 — 웹(GitHub Pages)에서는
+// 조용히 아무 일도 하지 않는다.
+if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+  window.Capacitor.Plugins.App.addListener('backButton', () => {
+    if (currentScreen > 1) {
+      showScreen(currentScreen - 1);
+    } else {
+      window.Capacitor.Plugins.App.exitApp();
+    }
+  });
+}

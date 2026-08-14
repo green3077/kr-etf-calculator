@@ -9,12 +9,16 @@
 <body>
 <div class="app">
 
+  <div class="ptr-indicator" id="ptrIndicator" style="display:none"></div>
+
   <div class="dots">
     <span class="dot active" data-dot="1"></span>
     <span class="dot" data-dot="2"></span>
     <span class="dot" data-dot="3"></span>
-    <span class="dot" data-dot="4"></span>
   </div>
+
+  <p class="update-bar"><button id="btnCheckUpdate" type="button" class="btn-link">업데이트 확인</button></p>
+  <p id="updateStatus" class="update-status"></p>
 
   <main class="screens">
 
@@ -47,7 +51,7 @@
       <p class="fx-status" id="quoteStatus"></p>
     </section>
 
-    <!-- 2. 보유수량 -->
+    <!-- 2. 보유수량 + 분배금 확인 (통합) -->
     <section class="screen" id="screen-2">
       <div class="icon">📊</div>
       <h1 id="sharesTitle">보유 수량</h1>
@@ -63,18 +67,8 @@
           <span class="value-krw" id="totalValue">-</span>
         </div>
       </div>
-    </section>
 
-    <!-- 3. 분배금 확인 -->
-    <section class="screen" id="screen-3">
-      <div class="icon">💵</div>
-      <h1 id="divTitle">이번 분배금</h1>
-      <div class="result-card" id="holdingCard3" style="display:none">
-        <div class="result-row final-row">
-          <span class="label">보유 평가금액</span>
-          <span class="value-krw" id="totalValue3">-</span>
-        </div>
-      </div>
+      <p class="section-title" id="divTitle">이번 분배금</p>
       <div class="suffix-input">
         <input type="number" id="divPerUnit" inputmode="decimal" min="0" step="1" placeholder="확인중입니다." readonly>
         <span class="suffix">원/주</span>
@@ -88,10 +82,11 @@
       <div id="manualDivBlock" class="manual-div-block" style="display:none">
         <p class="hint-text">이 종목은 아직 분배금 자동조회를 지원하지 않습니다. 분배공시 등을 참고해 직접 입력해주세요.</p>
       </div>
+      <p class="fx-status pay-date-status" id="payDateStatus"></p>
     </section>
 
-    <!-- 4. 결과 -->
-    <section class="screen" id="screen-4">
+    <!-- 3. 결과 -->
+    <section class="screen" id="screen-3">
       <div class="icon">🧾</div>
       <h1 id="resultTitle">분배금 계산 결과</h1>
       <p class="result-subtitle" id="resultSubtitle"></p>
