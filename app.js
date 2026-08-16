@@ -12,8 +12,8 @@ const distCache = {}; // code -> 분배 내역 배열 (종목 리스트에서 �
 // ---------- 업데이트 확인 ----------
 // 사이드로드 앱은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자 확인 필요),
 // 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
-const APP_VERSION_CODE = 5;
-const APP_VERSION_NAME = "1.4";
+const APP_VERSION_CODE = 6;
+const APP_VERSION_NAME = "1.5";
 const UPDATE_MANIFEST_URL = "https://green3077.github.io/kr-etf-calculator/version.json";
 const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const UpdateBridge = IS_NATIVE_UPDATE ? window.Capacitor.registerPlugin("UpdateBridge") : null;
@@ -231,6 +231,82 @@ async function searchEtfByName(query) {
     })
     .slice(0, 20)
     .map((item) => ({ code: item.itemcode, name: item.itemname }));
+}
+
+// 국내 ETF 검색 + 미국주식 검색을 한 번에 합쳐서 보여준다 — 한쪽이 실패해도(네트워크 등)
+// 나머지 결과는 정상적으로 보여야 하므로 Promise.allSettled로 개별 실패를 흡수한다.
+async function searchAllStocks(query) {
+  const [krResult, usResult] = await Promise.allSettled([
+    searchEtfByName(query),
+    searchUsStocks(query),
+  ]);
+  const kr = krResult.status === 'fulfilled' ? krResult.value : [];
+  const us = usResult.status === 'fulfilled' ? usResult.value : [];
+  return kr.concat(us).slice(0, 20);
+}
+
+// ---------- 미국 주식 검색/시세 (세금계산 없이 검색+시세만 — 국내 ETF의 옵션/배당 재원분리
+// 세금모델이 미국주식엔 애초에 적용되지 않아 dist는 항상 null로 두고 기존 수동입력 폴백에 맡긴다) ----------
+// quote.price는 화면 전반의 formatKRW 기반 보유평가금액 계산이 그대로 재사용되도록 원화 환산값을
+// 넣어두고, 원래 USD 값은 quote.usdPrice/usdDiff에 별도 보관해 표시에만 쓴다.
+let fxRateCache = null;
+async function fetchFxRate() {
+  if (fxRateCache) return fxRateCache;
+  const text = await fetchProxiedText('https://api.stock.naver.com/marketindex/exchange/FX_USDKRW/prices?page=1&pageSize=1');
+  const json = JSON.parse(text.slice(text.indexOf('[')));
+  fxRateCache = parseFloat(json[0].closePrice.replace(/,/g, ''));
+  return fxRateCache;
+}
+
+// Yahoo Finance 검색 API — 미국 주요 거래소(나스닥/뉴욕/아멕스/BATS) 종목만 남긴다(그 외 국가
+// 거래소도 같은 회사명으로 섞여 나오는 걸 실측으로 확인했음, 예: "apple" 검색 시 독일 상장분도 포함).
+const US_EXCHANGES = ['NMS', 'NYQ', 'NGM', 'NCM', 'ASE', 'BTS', 'PCX'];
+async function searchUsStocks(query) {
+  const text = await fetchProxiedText(`https://query1.finance.yahoo.com/v1/finance/search?q=${encodeURIComponent(query)}&quotesCount=8&newsCount=0`);
+  const json = JSON.parse(text.slice(text.indexOf('{')));
+  const quotes = json.quotes || [];
+  return quotes
+    .filter((q) => (q.quoteType === 'EQUITY' || q.quoteType === 'ETF') && US_EXCHANGES.includes(q.exchange))
+    .slice(0, 8)
+    .map((q) => ({ code: q.symbol, name: q.longname || q.shortname || q.symbol, market: 'US' }));
+}
+
+async function fetchUsQuote(symbol) {
+  const text = await fetchProxiedText(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`);
+  const json = JSON.parse(text.slice(text.indexOf('{')));
+  const result = json.chart && json.chart.result && json.chart.result[0];
+  const meta = result && result.meta;
+  if (!meta || typeof meta.regularMarketPrice !== 'number') throw new Error('시세 조회 실패');
+  const usdPrice = meta.regularMarketPrice;
+  const prevClose = meta.previousClose || meta.chartPreviousClose || usdPrice;
+  const usdDiff = usdPrice - prevClose;
+  const pct = prevClose ? (usdDiff / prevClose) * 100 : 0;
+  const rate = await fetchFxRate();
+  return {
+    price: usdPrice * rate,
+    diff: usdDiff * rate,
+    pct: Number(pct.toFixed(2)),
+    usdPrice,
+    usdDiff: Number(usdDiff.toFixed(2)),
+    name: meta.longName || meta.shortName || symbol,
+  };
+}
+
+async function fetchQuoteForStock(stock) {
+  if (stock.market === 'US') return await fetchUsQuote(stock.code);
+  return await fetchQuote(stock.code);
+}
+
+function formatQuotePrice(q) {
+  if (q.usdPrice != null) return `$${q.usdPrice.toFixed(2)}`;
+  return formatKRW(q.price);
+}
+
+function formatHoldingValue(shares, q) {
+  if (q.usdPrice != null) {
+    return `$${(shares * q.usdPrice).toFixed(2)} (${formatKRW(shares * q.price)})`;
+  }
+  return formatKRW(shares * q.price);
 }
 
 const els = {
@@ -587,7 +663,7 @@ async function runWithConcurrency(items, worker, limit) {
 async function loadListQuote(stock) {
   const row = els.stockList.querySelector(`.stock-item[data-code="${stock.code}"]`);
   try {
-    const q = await fetchQuote(stock.code);
+    const q = await fetchQuoteForStock(stock);
     quoteCache[stock.code] = q;
     if (!row) return;
     renderRowQuote(row, q);
@@ -599,7 +675,7 @@ async function loadListQuote(stock) {
 function renderRowQuote(row, q) {
   const sign = q.diff > 0 ? '+' : '';
   const cls = q.diff > 0 ? 'diff-up' : q.diff < 0 ? 'diff-down' : '';
-  row.querySelector('.stock-quote-price').textContent = formatKRW(q.price);
+  row.querySelector('.stock-quote-price').textContent = formatQuotePrice(q);
   const diffEl = row.querySelector('.stock-quote-diff');
   diffEl.textContent = `${sign}${q.pct}%`;
   diffEl.className = 'stock-quote-diff ' + cls;
@@ -665,11 +741,11 @@ els.btnConfirmAddStock.addEventListener('click', async () => {
   els.btnConfirmAddStock.disabled = true;
   els.addStockStatus.textContent = '종목명 검색 중...';
   try {
-    const matches = await searchEtfByName(input);
+    const matches = await searchAllStocks(input);
     if (matches.length === 0) {
       els.addStockStatus.textContent = '❌ 일치하는 종목을 찾을 수 없습니다.';
     } else if (matches.length === 1) {
-      await addStockByCode(matches[0].code);
+      await addStockByCode(matches[0].code, matches[0].market);
     } else {
       els.addStockStatus.textContent = `${matches.length}개 종목이 검색되었습니다. 아래에서 선택하세요.`;
       renderSearchResults(matches);
@@ -683,18 +759,18 @@ els.btnConfirmAddStock.addEventListener('click', async () => {
 
 function renderSearchResults(matches) {
   els.stockSearchResults.innerHTML = matches.map((m) => `
-    <button type="button" class="stock-search-item" data-code="${m.code}">
-      <span class="stock-search-name">${m.name}</span>
+    <button type="button" class="stock-search-item" data-code="${m.code}" data-market="${m.market || 'KR'}">
+      <span class="stock-search-name">${m.name}${m.market === 'US' ? ' · 미국' : ''}</span>
       <span class="stock-search-code">${m.code}</span>
     </button>
   `).join('');
   els.stockSearchResults.style.display = 'flex';
   els.stockSearchResults.querySelectorAll('.stock-search-item').forEach((btn) => {
-    btn.addEventListener('click', () => addStockByCode(btn.dataset.code));
+    btn.addEventListener('click', () => addStockByCode(btn.dataset.code, btn.dataset.market));
   });
 }
 
-async function addStockByCode(code) {
+async function addStockByCode(code, market) {
   if (allStocks().some((s) => s.code === code)) {
     els.addStockStatus.textContent = '이미 목록에 있는 종목입니다.';
     return;
@@ -702,11 +778,19 @@ async function addStockByCode(code) {
   els.btnConfirmAddStock.disabled = true;
   els.addStockStatus.textContent = '종목 확인 중...';
   try {
-    const { name, quote: q } = await fetchNaverPage(code);
-    if (!name || !q) throw new Error('종목을 찾을 수 없습니다. 종목코드를 확인해주세요.');
-    els.addStockStatus.textContent = '분배 소스 확인 중...';
-    const dist = await deriveKnownDist(code, name);
-    customStocks.push({ code, name, issuer: dist ? ISSUER_LABELS[dist.type] : '직접 추가', custom: true, dist });
+    let name, q, dist = null, issuer;
+    if (market === 'US') {
+      q = await fetchUsQuote(code);
+      name = q.name;
+      issuer = '미국주식';
+    } else {
+      ({ name, quote: q } = await fetchNaverPage(code));
+      if (!name || !q) throw new Error('종목을 찾을 수 없습니다. 종목코드를 확인해주세요.');
+      els.addStockStatus.textContent = '분배 소스 확인 중...';
+      dist = await deriveKnownDist(code, name);
+      issuer = dist ? ISSUER_LABELS[dist.type] : '직접 추가';
+    }
+    customStocks.push({ code, name, issuer, custom: true, dist, market: market === 'US' ? 'US' : undefined });
     saveCustomStocks(customStocks);
     quoteCache[code] = q;
     els.customCodeInput.value = '';
@@ -752,7 +836,7 @@ async function selectStock(stock, itemEl) {
 
   els.quoteStatus.textContent = '시세 조회 중...';
   try {
-    const q = await fetchQuote(stock.code);
+    const q = await fetchQuoteForStock(stock);
     quoteCache[stock.code] = q;
     if (selectedStock !== stock) return; // 그 사이 다른 종목을 선택함
     quote = q;
@@ -775,7 +859,7 @@ function updateHoldingValue() {
   const shares = Number(els.shares.value);
   const valid = shares > 0 && quote;
   els.holdingCard.style.display = valid ? 'block' : 'none';
-  els.totalValue.textContent = valid ? formatKRW(shares * quote.price) : '-';
+  els.totalValue.textContent = valid ? formatHoldingValue(shares, quote) : '-';
 }
 els.shares.addEventListener('input', () => {
   updateHoldingValue();
@@ -836,7 +920,7 @@ function renderResult() {
   const preTax = shares * divPerUnit;
 
   els.metaShares.textContent = `${shares.toLocaleString('ko-KR')}주 보유`;
-  els.metaTotalValue.textContent = quote ? formatKRW(shares * quote.price) : '-';
+  els.metaTotalValue.textContent = quote ? formatHoldingValue(shares, quote) : '-';
   els.preTaxKrw.textContent = formatKRW(preTax);
 
   els.resultTitle.textContent = `${selectedStock.name} 분배금 결과`;

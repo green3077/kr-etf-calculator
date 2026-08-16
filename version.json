@@ -1,6 +1,6 @@
 {
-  "versionCode": 5,
-  "versionName": "1.4",
+  "versionCode": 6,
+  "versionName": "1.5",
   "apkUrl": "https://green3077.github.io/kr-etf-calculator/kr-etf-calculator.apk",
-  "notes": "종목 이름 검색 시 오타 허용 (예: koex 미국 → KODEX 미국 검색 가능)"
+  "notes": "종목 추가에서 미국주식도 검색/추가 가능 (시세만, 세금계산은 미지원)"
 }
