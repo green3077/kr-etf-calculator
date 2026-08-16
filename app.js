@@ -12,8 +12,8 @@ const distCache = {}; // code -> 분배 내역 배열 (종목 리스트에서 �
 // ---------- 업데이트 확인 ----------
 // 사이드로드 앱은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자 확인 필요),
 // 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
-const APP_VERSION_CODE = 4;
-const APP_VERSION_NAME = "1.3";
+const APP_VERSION_CODE = 5;
+const APP_VERSION_NAME = "1.4";
 const UPDATE_MANIFEST_URL = "https://green3077.github.io/kr-etf-calculator/version.json";
 const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const UpdateBridge = IS_NATIVE_UPDATE ? window.Capacitor.registerPlugin("UpdateBridge") : null;
@@ -191,11 +191,44 @@ async function fetchEtfList() {
   return etfListCache;
 }
 
+// 편집거리(레벤슈타인) — "koex"처럼 오타 섞인 단어도 "kodex"에 근접한 걸로 인정해 찾을 수 있게.
+function levenshtein(a, b) {
+  const m = a.length;
+  const n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) => [i, ...new Array(n).fill(0)]);
+  for (let j = 0; j <= n; j++) dp[0][j] = j;
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1]
+        ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+// 검색어 토큰 하나가 종목명의 어느 한 단어와 "근접"한지 — 부분 문자열이면 바로 인정하고,
+// 아니면 편집거리로 오타 한두 글자까지 허용한다(짧은 단어는 1글자, 4글자 넘으면 2글자까지).
+function fuzzyTokenMatches(token, nameWords) {
+  return nameWords.some((w) => {
+    if (w.includes(token) || token.includes(w)) return true;
+    const maxDist = token.length > 4 ? 2 : 1;
+    return levenshtein(token, w) <= maxDist;
+  });
+}
+
+// 검색어를 공백 기준으로 쪼개 각 단어가 종목명에 (정확히든 근접하게든) 다 있으면 매치로 본다 —
+// 예: "koex 미국" -> "KODEX 미국배당커버드콜액티브"("kodex"="koex" 편집거리1, "미국"은 그대로 포함).
 async function searchEtfByName(query) {
   const list = await fetchEtfList();
-  const q = query.trim().toLowerCase();
+  const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  if (tokens.length === 0) return [];
   return list
-    .filter((item) => item.itemname.toLowerCase().includes(q))
+    .filter((item) => {
+      const nameLower = item.itemname.toLowerCase();
+      const nameWords = nameLower.split(/\s+/);
+      return tokens.every((tok) => nameLower.includes(tok) || fuzzyTokenMatches(tok, nameWords));
+    })
     .slice(0, 20)
     .map((item) => ({ code: item.itemcode, name: item.itemname }));
 }
