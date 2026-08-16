@@ -12,8 +12,8 @@ const distCache = {}; // code -> 분배 내역 배열 (종목 리스트에서 �
 // ---------- 업데이트 확인 ----------
 // 사이드로드 앱은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자 확인 필요),
 // 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
-const APP_VERSION_CODE = 2;
-const APP_VERSION_NAME = "1.1";
+const APP_VERSION_CODE = 4;
+const APP_VERSION_NAME = "1.3";
 const UPDATE_MANIFEST_URL = "https://green3077.github.io/kr-etf-calculator/version.json";
 const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const UpdateBridge = IS_NATIVE_UPDATE ? window.Capacitor.registerPlugin("UpdateBridge") : null;
@@ -75,19 +75,141 @@ function allStocks() {
   return STOCKS.concat(customStocks);
 }
 
+// 자동조회가 안 되는 커스텀 종목은 화면2에서 사용자가 직접 세전 분배금을 입력할 수 있는데(기존
+// 기능), 그 값을 localStorage에 종목별로 저장해뒀다가 화면1 목록에도 "월배당금(직접입력)"으로
+// 계속 보여준다 — 자동조회 종목이 아니라도 한 번 입력하면 리스트에서 계속 보이게 하기 위함.
+const MANUAL_DIST_KEY = 'kretf_manual_dist';
+function loadManualDist() {
+  try {
+    return JSON.parse(localStorage.getItem(MANUAL_DIST_KEY) || '{}');
+  } catch (e) {
+    return {};
+  }
+}
+function saveManualDistValue(code, amount) {
+  manualDist[code] = amount;
+  localStorage.setItem(MANUAL_DIST_KEY, JSON.stringify(manualDist));
+}
+let manualDist = loadManualDist();
+
+// 표준 ISIN 체크섬 규칙(ISO 6166, Luhn) — 미래에셋(TIGER) 종목은 ksdFund가 곧 종목코드로부터
+// 계산되는 ISIN(KR7+코드+00+체크digit)이라는 걸 기존 2개 종목(472150→KR7472150002,
+// 0177R0→KR70177R0000)으로 역산해 확인했고, 별도 종목(441680)의 실제 분배 API 호출로도
+// 재검증함 — 그래서 TIGER 종목은 운용사 내부 ID를 몰라도 종목코드만으로 자동조회가 가능하다.
+function computeKrIsin(code) {
+  const base11 = 'KR7' + code.toUpperCase().padEnd(6, '0') + '00';
+  let numeric = '';
+  for (const ch of base11) {
+    numeric += /[A-Z]/.test(ch) ? (ch.charCodeAt(0) - 55).toString() : ch;
+  }
+  let sum = 0;
+  let dbl = true;
+  for (let i = numeric.length - 1; i >= 0; i--) {
+    let d = numeric.charCodeAt(i) - 48;
+    if (dbl) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    sum += d;
+    dbl = !dbl;
+  }
+  return base11 + ((10 - (sum % 10)) % 10);
+}
+
+const ISSUER_LABELS = {
+  mirae: '미래에셋자산운용',
+  samsung: '삼성자산운용',
+  sol: '신한자산운용',
+  ace: '한국투자신탁운용',
+  rise: 'KB자산운용',
+};
+
+// TIGER 외 4개 운용사도 ISIN 계산 같은 "공식"은 없지만, 각 사이트를 직접 뒤져서 실제 상품검색
+// API를 찾아냈다 — 기존 7종목의 내부ID를 그 자리에서 다시 조회해 결과가 정확히 일치하는 것까지
+// 확인함. 종목코드/이름으로 실시간 검색해서 내부ID를 얻으므로 KNOWN_CUSTOM_DIST처럼 미리 목록에
+// 등록해둘 필요가 없다.
+
+// 삼성자산운용(KODEX) 공식 상품검색 API — srchVal에 정확한 종목코드를 넣으면 그 종목만 온다.
+async function findSamsungDist(code) {
+  const text = await fetchProxiedText(`https://www.samsungfund.com/api/v1/kodex/product.do?srchTerm=w&srchVal=${code}&ordrColm=NAV&ordrSort=DESC&pageNo=1`);
+  const json = JSON.parse(text.slice(text.indexOf('[')));
+  const hit = json.find((it) => it.stkTicker === code);
+  return hit ? { type: 'samsung', id: hit.fId } : null;
+}
+
+// 신한자산운용(SOL) 공식 검색 API — 종목코드로는 매치가 안 되고 이름(브랜드명 포함 전체)으로
+// 검색해야 한다(실측 확인). ETF_CD6이 우리 종목코드와 일치하는 항목의 FUND_CD를 쓴다.
+async function findSolDist(code, name) {
+  const text = await fetchProxiedText(`https://www.soletf.com/api/etf/pds/search?keyword=${encodeURIComponent(name)}`);
+  const json = JSON.parse(text.slice(text.indexOf('{')));
+  const hit = (json.items || []).find((it) => it.ETF_CD6 === code);
+  return hit ? { type: 'sol', fundCd: hit.FUND_CD } : null;
+}
+
+// 한국투자신탁운용(ACE) 전체 상품 목록 API — size를 총 상품수(현재 111개)보다 크게 주면
+// 페이지네이션 없이 한 번에 다 온다. stockCd가 표준 ISIN이라 computeKrIsin(code)과 정확히
+// 일치하는 항목을 찾는다.
+async function findAceDist(code) {
+  const text = await fetchProxiedText('https://papi.aceetf.co.kr/api/funds?size=300');
+  const json = JSON.parse(text.slice(text.indexOf('{')));
+  const isin = computeKrIsin(code);
+  const hit = (json.data || []).find((it) => it.stockCd === isin);
+  return hit ? { type: 'ace', fundCode: hit.fundCd } : null;
+}
+
+// KB자산운용(RISE) 실제 상품검색 AJAX(POST/GET 둘 다 됨) — searchText에 종목코드를 넣으면
+// 상세페이지 링크(/prod/finderDetail/{slug})가 결과 HTML에 그 상품 하나만 남는다.
+async function findRiseDist(code) {
+  const text = await fetchProxiedText(`https://www.riseetf.co.kr/prod/finder/listJquery?searchText=${code}&page=1&searchOrder=&searchBoardType=&searchFieldType=`);
+  const m = text.match(/finderDetail\/([A-Za-z0-9]+)/);
+  return m ? { type: 'rise', slug: m[1] } : null;
+}
+
+// 종목명의 브랜드 접두어로 운용사를 판별해 해당 운용사의 실시간 검색으로 dist를 얻는다.
+// 5개 브랜드(TIGER/KODEX/SOL/ACE/RISE) 중 어디에도 안 걸리거나, 검색이 실패/미발견이면
+// null — 화면2의 기존 수동입력 폴백으로 자연스럽게 넘어간다.
+async function deriveKnownDist(code, name) {
+  try {
+    if (/^TIGER\s/i.test(name)) return { type: 'mirae', ksdFund: computeKrIsin(code), jongCode: code };
+    if (/^KODEX\s/i.test(name)) return await findSamsungDist(code);
+    if (/^SOL\s/i.test(name)) return await findSolDist(code, name);
+    if (/^ACE\s/i.test(name)) return await findAceDist(code);
+    if (/^RISE\s/i.test(name)) return await findRiseDist(code);
+  } catch (e) {
+    // 조용히 무시하고 null 반환 — 아래에서 수동입력 폴백으로 처리됨.
+  }
+  return null;
+}
+
+// ---------- 종목명 검색 (네이버 전체 국내 ETF 목록) ----------
+let etfListCache = null;
+async function fetchEtfList() {
+  if (etfListCache) return etfListCache;
+  const text = await fetchProxiedText('https://finance.naver.com/api/sise/etfItemList.nhn');
+  const json = JSON.parse(text.slice(text.indexOf('{')));
+  etfListCache = (json.result && json.result.etfItemList) || [];
+  return etfListCache;
+}
+
+async function searchEtfByName(query) {
+  const list = await fetchEtfList();
+  const q = query.trim().toLowerCase();
+  return list
+    .filter((item) => item.itemname.toLowerCase().includes(q))
+    .slice(0, 20)
+    .map((item) => ({ code: item.itemcode, name: item.itemname }));
+}
+
 const els = {
   ptrIndicator: document.getElementById('ptrIndicator'),
   stockList: document.getElementById('stockList'),
-  quoteCard: document.getElementById('quoteCard'),
-  quoteName: document.getElementById('quoteName'),
-  quotePrice: document.getElementById('quotePrice'),
-  quoteDiff: document.getElementById('quoteDiff'),
   quoteStatus: document.getElementById('quoteStatus'),
   btnShowAddStock: document.getElementById('btnShowAddStock'),
   stockAddForm: document.getElementById('stockAddForm'),
   customCodeInput: document.getElementById('customCodeInput'),
   btnConfirmAddStock: document.getElementById('btnConfirmAddStock'),
   addStockStatus: document.getElementById('addStockStatus'),
+  stockSearchResults: document.getElementById('stockSearchResults'),
   sharesTitle: document.getElementById('sharesTitle'),
   sharesSub: document.getElementById('sharesSub'),
   shares: document.getElementById('shares'),
@@ -227,10 +349,10 @@ function ymd(s) {
   return `${s.slice(0, 4)}-${s.slice(4, 6)}-${s.slice(6, 8)}`;
 }
 
-// 사용자가 "+ 종목 코드로 추가"한 커스텀 종목은 어떤 운용사인지 몰라 dist가 비어있는 게
-// 기본이지만, 실제로 확인해서 정확한 내부 ID를 찾아낸 종목은 여기 등록해두면 커스텀으로
-// 추가했을 때도(localStorage에 dist 없이 저장돼 있어도) 정확한 분배금 자동조회가 된다.
-// 코드로 찾아 확인하는 대로 하나씩 늘려가는 목록 — 화면의 7종목과 같은 방식.
+// 이제 5개 브랜드(TIGER/KODEX/SOL/ACE/RISE) 전부 addStockByCode()의 deriveKnownDist()가
+// 실시간 검색으로 dist를 찾아 커스텀 종목 저장 시점에 직접 저장하므로, 이 목록은 더 이상
+// 새 종목을 등록해둘 필요가 없다 — 그 라이브 조회 자체가 실패할 때(네트워크 문제 등)만 쓰이는
+// 정적 백업용으로 남겨둔다.
 const KNOWN_CUSTOM_DIST = {
   '0105E0': { type: 'sol', fundCd: '211097' }, // SOL 코리아고배당
 };
@@ -291,20 +413,34 @@ async function fetchDistAce(fundCode) {
 
 // KB자산운용(RISE) — 별도 API 없이 상품 상세 페이지에 표가 서버에서 이미 렌더링되어 있다.
 // 과세표준액이 0원인 달은 "-"로 표시되어 있어 0으로 취급한다.
-// (2026-08-09: jina 프록시가 이 표를 탭 구분 대신 마크다운 표(`| ... | ... |`)로 내보내도록
-// 사이트 쪽 렌더링이 바뀐 걸 확인해서 정규식을 그에 맞게 고쳤다 — 예전 탭 구분 정규식은 더 이상 매치되지 않음.)
+// jina 프록시가 이 표를 내보내는 형식이 세션마다 왔다갔다한다는 걸 실측으로 확인함 — 2026-08-09에는
+// 탭 구분 대신 마크다운 표(`| ... | ... |`)로 바뀐 걸 보고 정규식을 그쪽으로 고쳤는데, 이번
+// 세션(2026-08-16)에 다시 순수 탭 구분(`날짜\t날짜\t금액\t금액`)으로 돌아온 걸 확인함 — Naver
+// 시세 파싱(dedupeNaverHalf)처럼 사이트 쪽이 아니라 jina 렌더링 자체가 들쭉날쭉한 것으로 보여서,
+// 둘 다 시도하는 방식으로 고쳤다(마크다운 표 우선 시도 → 매치 없으면 탭 구분으로 재시도).
 async function fetchDistRise(slug) {
   const text = await fetchProxiedText(`https://www.riseetf.co.kr/prod/finderDetail/${slug}`);
   const rows = [];
-  const re = /\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([\d,]+)\s*\|\s*(-|[\d,]+)\s*\|/g;
+  const reMarkdown = /\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*(\d{4}-\d{2}-\d{2})\s*\|\s*([\d,]+)\s*\|\s*(-|[\d,]+)\s*\|/g;
+  const reTab = /(\d{4}-\d{2}-\d{2})\t(\d{4}-\d{2}-\d{2})\t([\d,]+)\t(-|[\d,]+)/g;
   let m;
-  while ((m = re.exec(text))) {
+  while ((m = reMarkdown.exec(text))) {
     rows.push({
       basicDate: m[1],
       payDate: m[2],
       amount: Number(m[3].replace(/,/g, '')),
       taxAmount: m[4] === '-' ? 0 : Number(m[4].replace(/,/g, '')),
     });
+  }
+  if (rows.length === 0) {
+    while ((m = reTab.exec(text))) {
+      rows.push({
+        basicDate: m[1],
+        payDate: m[2],
+        amount: Number(m[3].replace(/,/g, '')),
+        taxAmount: m[4] === '-' ? 0 : Number(m[4].replace(/,/g, '')),
+      });
+    }
   }
   return rows;
 }
@@ -320,8 +456,8 @@ function showScreen(n) {
     d.classList.toggle('done', idx < n);
   });
 
-  els.btnPrev.style.display = n === 1 ? 'none' : '';
-  els.navButtons.classList.toggle('centered', n === 1);
+  // 화면1(종목 선택)은 종목 선택 즉시 화면2로 자동 이동하므로 다음/이전 버튼이 필요 없다.
+  els.navButtons.style.display = n === 1 ? 'none' : 'flex';
   els.btnNext.textContent = n === TOTAL_SCREENS ? '처음으로' : '다음';
 
   currentScreen = n;
@@ -336,8 +472,7 @@ function showScreen(n) {
 
 function updateNextEnabled() {
   let valid = true;
-  if (currentScreen === 1) valid = !!(selectedStock && quote);
-  else if (currentScreen === 2) valid = Number(els.shares.value) > 0 && Number(els.divPerUnit.value) > 0;
+  if (currentScreen === 2) valid = Number(els.shares.value) > 0 && Number(els.divPerUnit.value) > 0;
   els.btnNext.disabled = !valid;
 }
 
@@ -361,7 +496,6 @@ function resetApp() {
   els.divPerUnit.value = '';
   els.divPerUnit.readOnly = true;
   document.querySelectorAll('.stock-item').forEach((el) => el.classList.remove('selected'));
-  els.quoteCard.style.display = 'none';
   els.quoteStatus.textContent = '';
 }
 
@@ -379,7 +513,7 @@ function renderStockList() {
       <span class="stock-info">
         <span class="stock-name">${stock.name}</span>
         <span class="stock-meta">${stock.code} · ${stock.issuer}</span>
-        <span class="stock-dist">${stock.dist || KNOWN_CUSTOM_DIST[stock.code] ? '분배 조회 중...' : ''}</span>
+        <span class="stock-dist">${stock.dist || KNOWN_CUSTOM_DIST[stock.code] ? '분배 조회 중...' : (manualDist[stock.code] ? `월배당금(직접입력) ${formatKRW(manualDist[stock.code])}` : '')}</span>
       </span>
       <span class="stock-quote">
         <span class="stock-quote-price">-</span>
@@ -451,7 +585,7 @@ function payTimingLabel(d) {
 }
 
 async function loadListDist(stock) {
-  if (!stock.dist && !KNOWN_CUSTOM_DIST[stock.code]) return; // 소스를 모르는 커스텀 종목은 조용히 건너뜀
+  if (!stock.dist && !KNOWN_CUSTOM_DIST[stock.code]) return; // 소스를 모르는 커스텀 종목(직접입력값은 렌더 시점에 이미 채워짐)은 건너뜀
   const row = els.stockList.querySelector(`.stock-item[data-code="${stock.code}"]`);
   const distEl = row && row.querySelector('.stock-dist');
   try {
@@ -473,17 +607,61 @@ async function loadListDist(stock) {
   }
 }
 
-// ---------- 종목 직접 추가 ----------
+// ---------- 종목 직접 추가 (코드 또는 이름) ----------
 els.btnShowAddStock.addEventListener('click', () => {
   const showing = els.stockAddForm.style.display !== 'none';
   els.stockAddForm.style.display = showing ? 'none' : 'flex';
   els.addStockStatus.textContent = '';
+  els.stockSearchResults.style.display = 'none';
+  els.stockSearchResults.innerHTML = '';
   if (!showing) els.customCodeInput.focus();
 });
 
+// 종목코드(6자리 영문+숫자)면 바로 코드로 추가, 아니면 이름 검색으로 처리한다.
 els.btnConfirmAddStock.addEventListener('click', async () => {
-  const code = els.customCodeInput.value.trim();
-  if (!code) return;
+  const input = els.customCodeInput.value.trim();
+  if (!input) return;
+  els.stockSearchResults.style.display = 'none';
+  els.stockSearchResults.innerHTML = '';
+
+  if (/^[0-9A-Za-z]{6}$/.test(input)) {
+    await addStockByCode(input.toUpperCase());
+    return;
+  }
+
+  els.btnConfirmAddStock.disabled = true;
+  els.addStockStatus.textContent = '종목명 검색 중...';
+  try {
+    const matches = await searchEtfByName(input);
+    if (matches.length === 0) {
+      els.addStockStatus.textContent = '❌ 일치하는 종목을 찾을 수 없습니다.';
+    } else if (matches.length === 1) {
+      await addStockByCode(matches[0].code);
+    } else {
+      els.addStockStatus.textContent = `${matches.length}개 종목이 검색되었습니다. 아래에서 선택하세요.`;
+      renderSearchResults(matches);
+    }
+  } catch (err) {
+    els.addStockStatus.textContent = '❌ 종목명 검색에 실패했습니다.';
+  } finally {
+    els.btnConfirmAddStock.disabled = false;
+  }
+});
+
+function renderSearchResults(matches) {
+  els.stockSearchResults.innerHTML = matches.map((m) => `
+    <button type="button" class="stock-search-item" data-code="${m.code}">
+      <span class="stock-search-name">${m.name}</span>
+      <span class="stock-search-code">${m.code}</span>
+    </button>
+  `).join('');
+  els.stockSearchResults.style.display = 'flex';
+  els.stockSearchResults.querySelectorAll('.stock-search-item').forEach((btn) => {
+    btn.addEventListener('click', () => addStockByCode(btn.dataset.code));
+  });
+}
+
+async function addStockByCode(code) {
   if (allStocks().some((s) => s.code === code)) {
     els.addStockStatus.textContent = '이미 목록에 있는 종목입니다.';
     return;
@@ -493,10 +671,14 @@ els.btnConfirmAddStock.addEventListener('click', async () => {
   try {
     const { name, quote: q } = await fetchNaverPage(code);
     if (!name || !q) throw new Error('종목을 찾을 수 없습니다. 종목코드를 확인해주세요.');
-    customStocks.push({ code, name, issuer: '직접 추가', custom: true });
+    els.addStockStatus.textContent = '분배 소스 확인 중...';
+    const dist = await deriveKnownDist(code, name);
+    customStocks.push({ code, name, issuer: dist ? ISSUER_LABELS[dist.type] : '직접 추가', custom: true, dist });
     saveCustomStocks(customStocks);
     quoteCache[code] = q;
     els.customCodeInput.value = '';
+    els.stockSearchResults.style.display = 'none';
+    els.stockSearchResults.innerHTML = '';
     els.addStockStatus.textContent = `✅ "${name}" 추가되었습니다.`;
     els.stockAddForm.style.display = 'none';
     renderStockList();
@@ -505,7 +687,7 @@ els.btnConfirmAddStock.addEventListener('click', async () => {
   } finally {
     els.btnConfirmAddStock.disabled = false;
   }
-});
+}
 
 function removeCustomStock(code) {
   customStocks = customStocks.filter((s) => s.code !== code);
@@ -517,19 +699,21 @@ function removeCustomStock(code) {
   renderStockList();
 }
 
+// 종목을 탭하면 시세를 확보하는 즉시 화면2(보유수량)로 바로 넘어간다 — 별도 '다음' 버튼 없음.
+// 목록 로드 시 이미 quoteCache에 시세가 채워져 있는 경우가 대부분이라 보통 지연 없이 바로 넘어간다.
 async function selectStock(stock, itemEl) {
   selectedStock = stock;
   distList = distCache[stock.code] || null;
   document.querySelectorAll('.stock-item').forEach((el) => el.classList.remove('selected'));
   itemEl.classList.add('selected');
 
-  els.quoteCard.style.display = 'none';
   quote = null;
-  updateNextEnabled();
+  els.quoteStatus.textContent = '';
 
   const cached = quoteCache[stock.code];
   if (cached) {
-    applyQuote(stock, cached);
+    quote = cached;
+    showScreen(2);
     return;
   }
 
@@ -538,25 +722,13 @@ async function selectStock(stock, itemEl) {
     const q = await fetchQuote(stock.code);
     quoteCache[stock.code] = q;
     if (selectedStock !== stock) return; // 그 사이 다른 종목을 선택함
-    applyQuote(stock, q);
+    quote = q;
+    els.quoteStatus.textContent = '';
+    showScreen(2);
   } catch (err) {
     if (selectedStock !== stock) return;
     els.quoteStatus.textContent = '시세 조회 실패 — 잠시 후 다시 시도해주세요.';
-  } finally {
-    if (selectedStock === stock) updateNextEnabled();
   }
-}
-
-function applyQuote(stock, q) {
-  quote = q;
-  els.quoteName.textContent = stock.name;
-  els.quotePrice.textContent = formatKRW(q.price);
-  const sign = q.diff > 0 ? '+' : '';
-  const cls = q.diff > 0 ? 'diff-up' : q.diff < 0 ? 'diff-down' : '';
-  els.quoteDiff.innerHTML = `<span class="${cls}">${sign}${formatKRW(q.diff)} (${sign}${q.pct}%)</span>`;
-  els.quoteCard.style.display = 'block';
-  els.quoteStatus.textContent = '';
-  updateNextEnabled();
 }
 
 // ---------- 화면 2: 보유수량 ----------
@@ -608,6 +780,7 @@ async function loadDistribution() {
     els.divTitle.textContent = '분배금 입력';
     els.divPerUnit.readOnly = false;
     els.divPerUnit.placeholder = '예: 200';
+    if (manualDist[stock.code]) els.divPerUnit.value = manualDist[stock.code];
     els.divStatus.textContent = '자동 조회 실패 — 공시를 참고해 직접 입력해주세요.';
     els.manualDivBlock.style.display = 'block';
     els.payDateStatus.textContent = '';
@@ -615,7 +788,13 @@ async function loadDistribution() {
     if (selectedStock === stock) updateNextEnabled();
   }
 }
-els.divPerUnit.addEventListener('input', updateNextEnabled);
+els.divPerUnit.addEventListener('input', () => {
+  updateNextEnabled();
+  if (!els.divPerUnit.readOnly && selectedStock) {
+    const v = Number(els.divPerUnit.value);
+    if (v > 0) saveManualDistValue(selectedStock.code, v);
+  }
+});
 
 // ---------- 화면 4: 결과 ----------
 function renderResult() {

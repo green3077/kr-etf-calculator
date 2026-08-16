@@ -31,23 +31,14 @@
       <div class="stock-list" id="stockList"></div>
 
       <div class="stock-add-row">
-        <button type="button" class="stock-add-btn" id="btnShowAddStock">+ 종목 코드로 추가</button>
+        <button type="button" class="stock-add-btn" id="btnShowAddStock">+ 종목 추가</button>
       </div>
       <div class="stock-add-form" id="stockAddForm" style="display:none">
-        <input type="text" id="customCodeInput" placeholder="종목코드 (예: 483280)">
+        <input type="text" id="customCodeInput" placeholder="종목코드 또는 종목명 (예: 483280, TIGER 200)">
         <button type="button" class="stock-add-confirm-btn" id="btnConfirmAddStock">추가</button>
       </div>
+      <div class="stock-search-results" id="stockSearchResults" style="display:none"></div>
       <p class="fx-status" id="addStockStatus"></p>
-
-      <div class="result-card" id="quoteCard" style="display:none">
-        <div class="result-row final-row">
-          <span class="label" id="quoteName">-</span>
-          <span class="value-stack">
-            <span class="value-krw" id="quotePrice">-</span>
-            <span class="value-usd" id="quoteDiff">-</span>
-          </span>
-        </div>
-      </div>
       <p class="fx-status" id="quoteStatus"></p>
     </section>
 
@@ -127,8 +118,8 @@
 
   </main>
 
-  <div class="nav-buttons centered" id="navButtons">
-    <button type="button" id="btnPrev" class="btn secondary" style="display:none">이전</button>
+  <div class="nav-buttons" id="navButtons" style="display:none">
+    <button type="button" id="btnPrev" class="btn secondary">이전</button>
     <button type="button" id="btnNext" class="btn primary" disabled>다음</button>
   </div>
 

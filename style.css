@@ -317,6 +317,38 @@ input[type="number"]::-webkit-inner-spin-button {
   cursor: pointer;
 }
 
+.stock-search-results {
+  width: 100%;
+  max-width: 320px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 8px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.stock-search-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  text-align: left;
+  background: #1a1d24;
+  border: 1px solid #2c2f38;
+  border-radius: 10px;
+  padding: 9px 12px;
+  color: #f2f3f5;
+  font-size: 12px;
+  cursor: pointer;
+}
+.stock-search-item:active {
+  border-color: #6ee7b7;
+}
+.stock-search-code {
+  color: #9aa0ac;
+  flex: none;
+}
+
 /* ---- 분배금 재원 분리 (옵션/배당) ---- */
 .split-card {
   margin-top: 12px;
