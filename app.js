@@ -12,8 +12,8 @@ const distCache = {}; // code -> 분배 내역 배열 (종목 리스트에서 �
 // ---------- 업데이트 확인 ----------
 // 사이드로드 앱은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자 확인 필요),
 // 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
-const APP_VERSION_CODE = 7;
-const APP_VERSION_NAME = "1.6";
+const APP_VERSION_CODE = 8;
+const APP_VERSION_NAME = "1.7";
 const UPDATE_MANIFEST_URL = "https://green3077.github.io/kr-etf-calculator/version.json";
 const IS_NATIVE_UPDATE = !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform());
 const UpdateBridge = IS_NATIVE_UPDATE ? window.Capacitor.registerPlugin("UpdateBridge") : null;
@@ -1097,6 +1097,41 @@ async function refreshFailedDistributions() {
     ptrRefreshing = false;
   }, 800);
 }
+
+// ---------- 실패한 시세/분배금 자동 재시도 ----------
+// 사용자 요청: "조회 실패 뜨는 종목은 될 때까지 계속 시도해달라, 실패한 종목만" — 위의
+// pull-to-refresh는 사용자가 직접 당겨야 하므로, 그와 별개로 백그라운드에서 일정 간격마다
+// 스스로 확인해서 그 시점에 "조회 실패" 상태인 종목만 골라 재시도한다. 이미 성공한 종목은
+// 이 루프가 절대 다시 요청하지 않는다(리스트 렌더 시 이미 채워진 값을 건드리지 않음).
+const AUTO_RETRY_INTERVAL_MS = 10000;
+let autoRetryRunning = false;
+
+async function autoRetryFailedItems() {
+  if (autoRetryRunning) return; // 이전 재시도가 아직 진행 중이면 이번 틱은 건너뜀(중복 요청 방지)
+  const quoteTargets = [];
+  const distTargets = [];
+  els.stockList.querySelectorAll('.stock-item').forEach((row) => {
+    const stock = allStocks().find((s) => s.code === row.dataset.code);
+    if (!stock) return;
+    const priceEl = row.querySelector('.stock-quote-price');
+    if (priceEl && priceEl.textContent === '조회 실패') quoteTargets.push(stock);
+    const distEl = row.querySelector('.stock-dist');
+    if (distEl && (distEl.textContent === '분배 내역 없음' || distEl.textContent === '분배 조회 실패')) {
+      distTargets.push(stock);
+    }
+  });
+  if (quoteTargets.length === 0 && distTargets.length === 0) return;
+
+  autoRetryRunning = true;
+  try {
+    if (quoteTargets.length) await runWithConcurrency(quoteTargets, (s) => loadListQuote(s), 3);
+    if (distTargets.length) await runWithConcurrency(distTargets, (s) => loadListDist(s), 3);
+  } finally {
+    autoRetryRunning = false;
+  }
+}
+
+setInterval(autoRetryFailedItems, AUTO_RETRY_INTERVAL_MS);
 
 // ---------- 안드로이드 하드웨어 뒤로가기: 앱 종료 대신 이전 화면으로 이동 ----------
 // capacitor.js가 로드된 네이티브 APK 안에서만 window.Capacitor가 존재 — 웹(GitHub Pages)에서는

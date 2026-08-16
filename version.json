@@ -1,6 +1,6 @@
 {
-  "versionCode": 7,
-  "versionName": "1.6",
+  "versionCode": 8,
+  "versionName": "1.7",
   "apkUrl": "https://green3077.github.io/kr-etf-calculator/kr-etf-calculator.apk",
-  "notes": "종목명이 길 때 현재가가 가려지던 목록 표시 버그 수정"
+  "notes": "시세/분배금 조회 실패 종목 자동 재시도 (될 때까지 백그라운드에서 계속 시도)"
 }
