@@ -225,18 +225,24 @@ input[type="number"]::-webkit-inner-spin-button {
   font-size: 13px;
   font-weight: 600;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .stock-item .stock-meta {
   font-size: 11px;
   color: #9aa0ac;
   margin-top: 2px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .stock-item .stock-dist {
   font-size: 11px;
   color: #7c9885;
   margin-top: 2px;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .stock-item .stock-quote {
   display: flex;
