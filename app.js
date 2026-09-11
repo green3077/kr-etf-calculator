@@ -373,12 +373,34 @@ async function withRetry(fn, retries = 2, delayMs = 500) {
   throw lastErr;
 }
 
+// jina 무료 프록시는 API 키 없이는 분당 요청 수가 낮게 제한되어 있다(공식 기준 대략 분당 20회).
+// 종목이 여럿이라 화면1 로딩 시 동시 3개씩 요청하고, 실패하면 withRetry가 또 2번씩 재시도하고,
+// 그래도 실패한 채로 남으면 10초마다 자동 재시도(autoRetryFailedItems)까지 겹쳐서 순간적으로
+// 이 한도를 넘기기 쉽다 — 그러면 그 순간의 모든 요청이 한꺼번에 실패해 "메인메뉴 종목이 거의
+// 다 조회 실패"로 보이고, 자동 재시도가 같은 패턴을 반복해 계속 회복이 안 된다. 그래서 프록시를
+// 거치는 모든 요청을 하나의 큐로 모아 최소 간격을 두고 순차 전송하도록 제한한다.
+const PROXY_MIN_INTERVAL_MS = 3200; // 분당 대략 18~19회로 제한(20회 한도에 여유를 둠)
+let proxyQueue = Promise.resolve();
+let lastProxyCallAt = 0;
+
+function scheduleProxyCall(fn) {
+  const run = proxyQueue.then(async () => {
+    const wait = lastProxyCallAt + PROXY_MIN_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastProxyCallAt = Date.now();
+    return fn();
+  });
+  // 이 호출이 실패해도 큐 자체는 계속 이어지도록 실패를 흡수한 체인을 유지한다.
+  proxyQueue = run.catch(() => {});
+  return run;
+}
+
 async function fetchProxiedText(url) {
-  return withRetry(async () => {
+  return withRetry(() => scheduleProxyCall(async () => {
     const res = await fetch(JINA_PROXY + url);
     if (!res.ok) throw new Error('조회 실패');
     return res.text();
-  });
+  }));
 }
 
 async function fetchDirectText(url) {
