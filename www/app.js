@@ -1306,7 +1306,7 @@ setInterval(autoRetryFailedItems, AUTO_RETRY_INTERVAL_MS);
 // ---------- 안드로이드 하드웨어 뒤로가기: 앱 종료 대신 이전 화면으로 이동 ----------
 // capacitor.js가 로드된 네이티브 APK 안에서만 window.Capacitor가 존재 — 웹(GitHub Pages)에서는
 // 조용히 아무 일도 하지 않는다.
-if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()) {
+if (window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform() && window.Capacitor.Plugins.App) {
   window.Capacitor.Plugins.App.addListener('backButton', () => {
     if (currentScreen > 1) {
       showScreen(currentScreen - 1);
