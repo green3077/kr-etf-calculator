@@ -17,11 +17,16 @@ const distCache = {}; // code -> 분배 내역 배열 (종목 리스트에서 �
 // ---------- 업데이트 확인 ----------
 // 사이드로드 앱은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자 확인 필요),
 // 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
-const APP_VERSION_CODE = 8;
-const APP_VERSION_NAME = "1.7";
+const APP_VERSION_CODE = 10;
+const APP_VERSION_NAME = "2.0.1";
 const UPDATE_MANIFEST_URL = "https://green3077.github.io/kr-etf-calculator/version.json";
 const IS_NATIVE_UPDATE = IS_NATIVE;
-const UpdateBridge = IS_NATIVE_UPDATE ? window.Capacitor.registerPlugin("UpdateBridge") : null;
+// 네이티브(MainActivity.java)에서 registerPlugin(UpdateBridgePlugin.class)로 이미 등록해뒀으므로,
+// 웹 쪽에서 다시 Capacitor.registerPlugin()을 호출할 필요가 없다(번들러 없는 순수 <script> 앱이라
+// 그 함수 자체가 전역에 노출되지 않아 호출 시 "registerPlugin is not a function"으로 즉시
+// 스크립트 전체가 죽어 모든 버튼이 먹통이 되던 원인이었음) — 네이티브 브릿지가 자동으로 채워주는
+// Capacitor.Plugins에서 바로 꺼내 쓴다.
+const UpdateBridge = IS_NATIVE_UPDATE ? window.Capacitor.Plugins.UpdateBridge : null;
 let pendingApkUrl = null;
 
 document.getElementById("btnCheckUpdate").addEventListener("click", async () => {
