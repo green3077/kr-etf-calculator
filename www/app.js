@@ -188,9 +188,25 @@ async function deriveKnownDist(code, name) {
 
 // ---------- 종목명 검색 (네이버 전체 국내 ETF 목록) ----------
 let etfListCache = null;
+// finance.naver.com의 구버전 .nhn 엔드포인트는 EUC-KR로 응답한다(Content-Type 헤더로 확인됨) —
+// 네이티브 앱이 프록시 없이 직접 fetch하면 브라우저/WebView가 기본 UTF-8로 잘못 디코딩해서
+// 종목명의 한글이 전부 깨진다. jina를 거칠 때는 jina가 알아서 UTF-8로 정규화해 내보내서 이
+// 문제가 가려져 있었다가, 네이티브 직접 호출로 바꾸면서 드러남 — 이름으로 종목을 검색/추가하는
+// 기능이 전부 이 깨진 텍스트로 매칭을 시도해 실패하던 원인. arrayBuffer로 받아 EUC-KR로
+// 명시적으로 디코딩해서 고친다(브라우저 폴백은 jina가 이미 정규화해주므로 그대로 fetchText 사용).
+async function fetchEucKrText(url) {
+  if (!IS_NATIVE) return fetchText(url);
+  return withRetry(async () => {
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('조회 실패');
+    const buf = await res.arrayBuffer();
+    return new TextDecoder('euc-kr').decode(buf);
+  });
+}
+
 async function fetchEtfList() {
   if (etfListCache) return etfListCache;
-  const text = await fetchText('https://finance.naver.com/api/sise/etfItemList.nhn');
+  const text = await fetchEucKrText('https://finance.naver.com/api/sise/etfItemList.nhn');
   const json = JSON.parse(text.slice(text.indexOf('{')));
   etfListCache = (json.result && json.result.etfItemList) || [];
   return etfListCache;
@@ -224,10 +240,44 @@ function fuzzyTokenMatches(token, nameWords) {
 
 // 검색어를 공백 기준으로 쪼개 각 단어가 종목명에 (정확히든 근접하게든) 다 있으면 매치로 본다 —
 // 예: "koex 미국" -> "KODEX 미국배당커버드콜액티브"("kodex"="koex" 편집거리1, "미국"은 그대로 포함).
+// query의 글자들이 name 안에 순서대로(연속 아니어도) 다 나오면 매치로 보는 부분수열 검사 —
+// 예: "kodex타겟위클리콜"은 "KODEX 200타겟위클리커버드콜"에서 "200"과 "커버드"만 건너뛰면
+// 순서대로 다 나온다. 매치 구간(첫 글자~끝 글자 폭)이 좁을수록 더 정확한 매치로 보고 정렬용으로
+// 반환한다 — 다 못 찾으면 null.
+function subsequenceSpan(query, name) {
+  let qi = 0;
+  let start = -1, end = -1;
+  for (let i = 0; i < name.length && qi < query.length; i++) {
+    if (name[i] === query[qi]) {
+      if (start === -1) start = i;
+      end = i;
+      qi++;
+    }
+  }
+  return qi < query.length ? null : end - start + 1;
+}
+
 async function searchEtfByName(query) {
   const list = await fetchEtfList();
-  const tokens = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  if (tokens.length === 0) return [];
+  const trimmed = query.trim().toLowerCase();
+  if (!trimmed) return [];
+  const tokens = trimmed.split(/\s+/).filter(Boolean);
+  // 공백 없이 붙여쓴 한 단어 검색("kodex타겟위클리콜")은 기존 방식대로 하면 "kodex"라는 짧은
+  // 토큰이 모든 KODEX 상품의 첫 단어와 부분일치해버려(token.includes(w)) 관련 없는 결과가
+  // 잔뜩 섞여 나온다. 종목명에서 공백을 지운 뒤 붙여쓴 검색어가 그대로 들어있는 경우를 먼저
+  // 보고, 없으면(중간 단어를 생략한 축약형 등) 부분수열 매치로 폴백한다.
+  if (tokens.length === 1) {
+    const q = tokens[0];
+    const exact = list.filter((item) => item.itemname.toLowerCase().replace(/\s+/g, '').includes(q));
+    if (exact.length > 0) return exact.slice(0, 20).map((item) => ({ code: item.itemcode, name: item.itemname }));
+    if (q.length < 4) return []; // 너무 짧은 검색어는 부분수열 매치가 노이즈만 늘림
+    return list
+      .map((item) => ({ item, span: subsequenceSpan(q, item.itemname.toLowerCase().replace(/\s+/g, '')) }))
+      .filter((x) => x.span !== null)
+      .sort((a, b) => a.span - b.span)
+      .slice(0, 10)
+      .map((x) => ({ code: x.item.itemcode, name: x.item.itemname }));
+  }
   return list
     .filter((item) => {
       const nameLower = item.itemname.toLowerCase();
