@@ -378,19 +378,41 @@ async function withRetry(fn, retries = 2, delayMs = 500) {
   throw lastErr;
 }
 
-// mode: 'auto'(기본) — 네이티브 앱이면 직접 fetch(CORS 우회), 브라우저면 jina 프록시.
-//       'direct' — CORS가 열려있는 API라 브라우저에서도 항상 직접 fetch.
-//       'jina'   — 응답이 무겁거나(RISE 상세페이지) 파싱이 jina 렌더링 형식에 맞춰져 있어 항상 jina 경유.
+// jina 무료 프록시는 API 키 없이는 분당 요청 수가 낮게 제한되어 있다(공식 기준 대략 분당 20회).
+// 네이티브 앱은 대부분의 호출이 이제 jina를 아예 안 거치지만(CapacitorHttp 직접 호출), RISE
+// 교차검증과 브라우저 미리보기 폴백은 여전히 jina를 쓰므로, 그 두 경로가 몰릴 때 한도를 넘겨
+// 한꺼번에 실패하는 걸 막기 위해 jina로 나가는 요청만 하나의 큐로 모아 최소 간격을 두고
+// 순차 전송한다.
+const PROXY_MIN_INTERVAL_MS = 3200; // 분당 대략 18~19회로 제한(20회 한도에 여유를 둠)
+let proxyQueue = Promise.resolve();
+let lastProxyCallAt = 0;
+
+function scheduleProxyCall(fn) {
+  const run = proxyQueue.then(async () => {
+    const wait = lastProxyCallAt + PROXY_MIN_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    lastProxyCallAt = Date.now();
+    return fn();
+  });
+  // 이 호출이 실패해도 큐 자체는 계속 이어지도록 실패를 흡수한 체인을 유지한다.
+  proxyQueue = run.catch(() => {});
+  return run;
+}
+
+// mode: 'auto'(기본) — 네이티브 앱이면 직접 fetch(CORS 우회, 큐 없이 바로), 브라우저면 jina 프록시(큐 경유).
+//       'direct' — CORS가 열려있는 API라 브라우저에서도 항상 직접 fetch(큐 없음).
+//       'jina'   — 응답이 무겁거나(RISE 상세페이지) 파싱이 jina 렌더링 형식에 맞춰져 있어 항상 jina 경유(큐 경유).
 async function fetchText(url, mode = 'auto') {
-  return withRetry(async () => {
-    let target;
-    if (mode === 'jina') target = JINA_PROXY + url;
-    else if (mode === 'direct') target = url;
-    else target = IS_NATIVE ? url : JINA_PROXY + url;
+  const useJina = mode === 'jina' || (mode === 'auto' && !IS_NATIVE);
+  const target = useJina ? JINA_PROXY + url : url;
+  const rawFetch = async () => {
     const res = await fetch(target);
     if (!res.ok) throw new Error('조회 실패');
     return res.text();
-  });
+  };
+  // jina로 나가는 요청만 큐를 거친다 — 네이티브 직접 호출은 공용 프록시 레이트리밋과 무관하므로
+  // 재시도할 때마다 대기를 물릴 필요가 없다.
+  return withRetry(() => (useJina ? scheduleProxyCall(rawFetch) : rawFetch()));
 }
 
 // ---------- 시세 (네이버 실시간 시세 API) ----------
