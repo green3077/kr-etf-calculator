@@ -1,6 +1,6 @@
 {
-  "versionCode": 8,
-  "versionName": "1.7",
+  "versionCode": 9,
+  "versionName": "2.0",
   "apkUrl": "https://green3077.github.io/kr-etf-calculator/kr-etf-calculator.apk",
-  "notes": "시세/분배금 조회 실패 종목 자동 재시도 (될 때까지 백그라운드에서 계속 시도)"
+  "notes": "시세/분배금 조회를 jina 프록시 대신 각 공식 API에 직접 연결(네이티브 앱은 CORS 우회)해 훨씬 빠르게 개선, funetf.co.kr 통합 데이터로 분배금 2곳 교차검증 추가. ⚠ 서명키가 바뀌어 기존 설치 위에 덮어설치가 안 될 수 있음 — 안 되면 기존 앱 삭제 후 재설치 필요."
 }

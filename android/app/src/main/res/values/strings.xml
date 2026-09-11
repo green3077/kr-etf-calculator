@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">월배당ETF계산기</string>
+    <string name="title_activity_main">월배당ETF계산기</string>
+    <string name="package_name">com.green3077.kretfcalculator</string>
+    <string name="custom_url_scheme">com.green3077.kretfcalculator</string>
+</resources>
