@@ -1,6 +1,6 @@
 {
-  "versionCode": 10,
-  "versionName": "2.0.1",
+  "versionCode": 11,
+  "versionName": "2.0.2",
   "apkUrl": "https://green3077.github.io/kr-etf-calculator/kr-etf-calculator.apk",
-  "notes": "v2.0에서 종목 추가/업데이트 확인 버튼이 전혀 반응하지 않던 치명적 버그 수정(초기 스크립트가 앱 시작 시 바로 멈춰버리던 문제)."
+  "notes": "운용사 공식 데이터가 아직 반영 전인 최신 분배 회차를 funetf 통합 데이터로 먼저 보여줘, 메인 화면 '최근 분배'가 항상 실제 최신 회차를 가리키도록 수정."
 }

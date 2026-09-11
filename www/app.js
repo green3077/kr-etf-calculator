@@ -586,6 +586,15 @@ async function fetchOfficialDistribution(d) {
 // 'matched', 다르면 'mismatch'(그래도 운용사 공식값을 우선 사용), 한쪽만 성공하면 그 소스만 쓴다.
 // 결과 배열에 verification/crossCheckAmount를 얹어 반환하므로, 기존에 배열만 소비하던 코드
 // (loadDistribution/renderResult 등)는 그대로 동작한다.
+//
+// funetf는 다음 회차 분배가 확정되면 기준일 전에도(예: 실측상 D-2) 먼저 반영하는데, 운용사 공식
+// API는 기준일이 실제로 지나야 갱신되는 경우가 있어 며칠 더 느리다 — 이걸 그냥 official을
+// 우선시하면 "최근 분배"가 실제로는 이미 지난 최신 회차인데도 그 전 회차로 며칠간 고정돼
+// 보이는 문제가 생긴다(실측: KODEX 200타겟위클리커버드콜, funetf는 9/14 기준 회차를 이미 갖고
+// 있는데 삼성자산운용 공식 API는 아직 8/14 기준이 최신이었음). 그래서 official의 최신 기준일보다
+// 더 최신인 funetf 회차가 있으면 그것만 앞에 얹어 "최근 분배"가 항상 실제 최신 회차를 가리키게
+// 한다(세금 분리는 official이 없으니 fetchDistFunetf의 보수적 처리 — taxDivAmt 없으면 전액 과세 —
+// 를 그대로 따름).
 async function fetchDistribution(stock) {
   const officialSpec = stock.dist || KNOWN_CUSTOM_DIST[stock.code];
   const [officialResult, funetfResult] = await Promise.allSettled([
@@ -599,9 +608,15 @@ async function fetchDistribution(stock) {
 
   let list;
   if (official && funetf) {
-    list = official;
-    list.verification = official[0].amount === funetf[0].amount ? 'matched' : 'mismatch';
-    list.crossCheckAmount = funetf[0].amount;
+    const preview = funetf.filter((d) => d.basicDate > official[0].basicDate);
+    if (preview.length) {
+      list = preview.concat(official);
+      list.verification = 'funetf-preview';
+    } else {
+      list = official;
+      list.verification = official[0].amount === funetf[0].amount ? 'matched' : 'mismatch';
+      list.crossCheckAmount = funetf[0].amount;
+    }
   } else if (official) {
     list = official;
     list.verification = 'official-only';
@@ -833,6 +848,7 @@ function payTimingLabel(d) {
 function distVerificationText(verification, crossCheckAmount) {
   if (verification === 'matched') return '✓ 운용사 공식 데이터 · funetf 통합 데이터 2곳 교차 확인됨';
   if (verification === 'mismatch') return `⚠ 소스 간 금액 차이 있음(교차확인 참고값 ${crossCheckAmount}원) — 운용사 공식 데이터 기준으로 표시`;
+  if (verification === 'funetf-preview') return '(운용사 공식 발표 전 · funetf 통합 데이터로 최신 회차 우선 표시)';
   if (verification === 'funetf-only') return '(운용사 공식 교차확인 없음 · funetf 통합 데이터 기준)';
   return ''; // 'official-only' — 예전처럼 운용사 공식 데이터만 있고 교차확인은 없었던 경우, 문구 없이 조용히 표시
 }
