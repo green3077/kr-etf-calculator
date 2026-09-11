@@ -1,6 +1,6 @@
 {
   "appId": "com.green3077.kretfcalculator",
-  "appName": "월배당ETF계산기",
+  "appName": "월배당나무",
   "webDir": "www",
   "plugins": {
     "CapacitorHttp": {
