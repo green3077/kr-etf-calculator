@@ -20,8 +20,8 @@ const distCache = {}; // code -> 분배 내역 배열 (종목 리스트에서 �
 // ⚠ 이 두 값은 android/app/build.gradle의 versionCode/versionName과 매번 같이 올려야 한다 —
 // v2.0.1~2.0.2 릴리스에서 build.gradle만 올리고 이걸 안 올려서, 설치된 앱이 실제로는 최신인데도
 // "업데이트 가능"이 영원히 뜨는 버그가 있었다(실제로는 이미 최신이라 재설치해도 값이 그대로라 안 없어짐).
-const APP_VERSION_CODE = 12;
-const APP_VERSION_NAME = "2.0.3";
+const APP_VERSION_CODE = 13;
+const APP_VERSION_NAME = "2.0.4";
 const UPDATE_MANIFEST_URL = "https://green3077.github.io/kr-etf-calculator/version.json";
 const IS_NATIVE_UPDATE = IS_NATIVE;
 // 네이티브(MainActivity.java)에서 registerPlugin(UpdateBridgePlugin.class)로 이미 등록해뒀으므로,
@@ -869,7 +869,7 @@ async function loadListDist(stock) {
       return;
     }
     const latest = list[0];
-    const month = Number(latest.basicDate.slice(5, 7));
+    const month = Number((latest.payDate || latest.basicDate).slice(5, 7));
     const price = quoteCache[stock.code] && quoteCache[stock.code].price;
     const rateText = price ? ` (${(latest.amount / price * 100).toFixed(2)}%)` : '';
     const timing = payTimingLabel(latest);
@@ -1093,7 +1093,7 @@ function renderResult() {
     const latest = distList[0];
     // 공식 분배율(기준가 대비) 대신, 이슈어마다 제공 여부가 달라 항상 구할 수 있는
     // "이번 분배금 / 현재가"로 근사한 분배율을 부제목에 표시한다.
-    const month = Number(latest.basicDate.slice(5, 7));
+    const month = Number((latest.payDate || latest.basicDate).slice(5, 7));
     const rate = quote ? ((latest.amount / quote.price) * 100).toFixed(2) : null;
     els.resultSubtitle.textContent = rate
       ? `(${month}월 ${rate}% 분배, 분배금 ${formatKRW(latest.amount)})`
@@ -1137,8 +1137,9 @@ function renderYearlyBreakdown(shares, list) {
   let sumOption = 0;
   let sumDividend = 0;
   let sumPerShare = 0;
-  // list는 최신순 -> 화면에는 오래된 순으로 보여준다. 올해 기록만 보여준다.
-  const chron = list.filter((d) => d.basicDate.startsWith(currentYear)).reverse();
+  // list는 최신순 -> 화면에는 오래된 순으로 보여준다. 올해 기록만 보여준다(지급일 기준 — 아래
+  // 월 표시와 동일 기준으로 맞춰야 12월 기준일/1월 지급 같은 경계 케이스가 엇갈리지 않는다).
+  const chron = list.filter((d) => (d.payDate || d.basicDate).startsWith(currentYear)).reverse();
   chron.forEach((d) => {
     const optionAmt = shares * (d.amount - d.taxAmount);
     const dividendAmt = shares * d.taxAmount;
@@ -1151,7 +1152,7 @@ function renderYearlyBreakdown(shares, list) {
     rows.push(`
       <div class="yearly-row">
         <div class="yearly-row-top">
-          <span class="yearly-month">${d.basicDate.slice(5)}</span>
+          <span class="yearly-month">${(d.payDate || d.basicDate).slice(5)}</span>
           <span class="yearly-per-share">${d.amount}원(옵션${d.amount - d.taxAmount}·배당${d.taxAmount})</span>
           <span class="yearly-amount">${formatKRW(postTax)}</span>
         </div>
