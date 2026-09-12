@@ -17,8 +17,11 @@ const distCache = {}; // code -> 분배 내역 배열 (종목 리스트에서 �
 // ---------- 업데이트 확인 ----------
 // 사이드로드 앱은 스스로를 조용히 덮어쓸 수 없으므로(설치는 항상 사용자 확인 필요),
 // 새 버전이 있으면 외부 브라우저로 APK 다운로드 URL을 열어 다운로드->설치를 대신 시작해준다.
-const APP_VERSION_CODE = 10;
-const APP_VERSION_NAME = "2.0.1";
+// ⚠ 이 두 값은 android/app/build.gradle의 versionCode/versionName과 매번 같이 올려야 한다 —
+// v2.0.1~2.0.2 릴리스에서 build.gradle만 올리고 이걸 안 올려서, 설치된 앱이 실제로는 최신인데도
+// "업데이트 가능"이 영원히 뜨는 버그가 있었다(실제로는 이미 최신이라 재설치해도 값이 그대로라 안 없어짐).
+const APP_VERSION_CODE = 12;
+const APP_VERSION_NAME = "2.0.3";
 const UPDATE_MANIFEST_URL = "https://green3077.github.io/kr-etf-calculator/version.json";
 const IS_NATIVE_UPDATE = IS_NATIVE;
 // 네이티브(MainActivity.java)에서 registerPlugin(UpdateBridgePlugin.class)로 이미 등록해뒀으므로,
